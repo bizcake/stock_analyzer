@@ -1,0 +1,21 @@
+# 🚨 환경변수 (가장 중요: 절대 Git에 올라가면 안 됨)
+.env
+
+# 파이썬 및 가상환경
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# 장고 정적 파일 및 미디어
+staticfiles/
+media/
+
+# 로컬 데이터베이스
+db.sqlite3
+
+# 로그 파일 및 임시 파일
+*.log
+*.json

@@ -1,0 +1,28 @@
+.page-header {
+  margin-top: 30px;
+}
+
+.fa-trash-alt {
+  color: red;
+  float: right;
+  cursor: pointer;
+}
+
+.todo-complete {
+  text-decoration: line-through;
+}
+
+.todo-status-checkbox {
+  cursor: pointer;
+  margin-right: 3px;
+  zoom: 1.4;
+}
+
+.list-group-item2 {
+    border-width:1px 0 1px 0;
+    border-style: solid;
+    border-color: rgba(0,0,0, .125);
+}
+*{
+    font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif !important;
+}
