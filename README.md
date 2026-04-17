@@ -51,7 +51,6 @@ gcloud scheduler jobs list --location=asia-northeast3
 gcloud scheduler jobs run hourly-stock-analysis --location=asia-northeast3
 
 
-
 echo "# stock_analyzer" >> README.md
 git init
 git add README.md
@@ -59,3 +58,39 @@ git commit -m "first commit"
 git branch -M main
 git remote add origin https://github.com/bizcake/stock_analyzer.git
 git push -u origin main
+---
+
+## 🚀 CI/CD 및 배포 자동화 (Google Cloud Build)
+
+현재 이 프로젝트는 GitHub 리포지토리에 코드가 푸시되면 자동으로 Google Cloud Build를 통해 **Cloud Run**과 **Cloud Functions**에 배포되도록 설정되어 있습니다.
+
+### 1. 설정 방법
+
+1.  **GitHub 리포지토리 연결**:
+    - [GCP Console - Cloud Build 트리거](https://console.cloud.google.com/cloud-build/triggers) 페이지로 이동합니다.
+    - **리포지토리 연결**: GitHub(Cloud Build GitHub 앱)를 선택하고 https://github.com/bizcake/stock_analyzer.git 리포지토리를 연결합니다.
+    - **트리거 생성**:
+        - 이름: `deploy-on-push`
+        - 이벤트: `분기로 푸시`
+        - 소스: 연결한 리포지토리 및 `main` 분기
+        - 구성: `Cloud Build 구성 파일 (yaml)`
+        - Cloud Build 구성 파일 위치: `cloudbuild.yaml`
+    - **만들기**를 클릭합니다.
+
+2.  **GCP 권한 설정 (이미 완료됨)**:
+    - `./setup_cicd.sh` 실행을 통해 Cloud Build 서비스 계정에 필요한 권한(`Cloud Run Admin`, `Cloud Functions Admin` 등)이 부여되었습니다.
+
+### 2. 배포 흐름
+
+1.  로컬에서 코드를 수정하고 GitHub로 `push` 합니다.
+2.  Google Cloud Build가 자동으로 감지하여 `cloudbuild.yaml`에 정의된 단계를 실행합니다.
+    - Step 1: Docker 이미지 빌드
+    - Step 2: Container Registry에 이미지 푸시
+    - Step 3: Cloud Run (Django 앱) 배포
+    - Step 4: Cloud Functions 배포
+3.  배포 상태는 GCP Console의 [Cloud Build 기록](https://console.cloud.google.com/cloud-build/builds)에서 확인할 수 있습니다.
+
+### 3. 환경 변수 관리
+
+- Cloud Build는 기존에 설정된 Cloud Run/Functions의 환경 변수를 유지합니다. 
+- 새로운 환경 변수가 필요한 경우 [Secret Manager](https://console.cloud.google.com/security/secret-manager)를 사용하는 것을 권장합니다.

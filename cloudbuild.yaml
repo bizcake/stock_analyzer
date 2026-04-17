@@ -1,0 +1,51 @@
+steps:
+  # 1. Cloud Run을 위한 Docker 이미지 빌드
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA', '.']
+
+  # 2. 빌드된 이미지를 Container Registry에 푸시
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA']
+
+  # 3. Cloud Run (Django 앱) 배포
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'stocks'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA'
+      - '--region'
+      - 'us-west1'
+      - '--platform'
+      - 'managed'
+      - '--memory'
+      - '1Gi'
+      - '--allow-unauthenticated'
+
+  # 4. Cloud Functions (stock-analyzer-function) 배포
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'functions'
+      - 'deploy'
+      - 'stock-analyzer-function'
+      - '--runtime'
+      - 'python312'
+      - '--trigger-topic'
+      - 'trigger-stock-analysis'
+      - '--entry-point'
+      - 'run_stock_analysis'
+      - '--region'
+      - 'asia-northeast3'
+      - '--memory'
+      - '1024MB'
+      - '--timeout'
+      - '540s'
+
+images:
+  - 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
