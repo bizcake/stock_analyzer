@@ -9,6 +9,7 @@ from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 
+
 # .env 파일의 변수들을 시스템 환경변수로 등록
 load_dotenv()
 
@@ -58,7 +59,8 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-z_-z^##y@my*$l
 
 # Application definition
 INSTALLED_APPS = [
-    'import_export',
+    "jazzmin",
+    "import_export",
     'stock.apps.StocksConfig',
     "django.contrib.admin",
     "django.contrib.auth",
@@ -67,6 +69,42 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 ]
+
+JAZZMIN_SETTINGS = {
+    "site_title": "Stock Admin",
+    "site_header": "MyStock",
+    "site_brand": "MyStock",
+    "welcome_sign": "Welcome to MyStock Admin",
+    "copyright": "copyright © 2024 MyStock",
+    "search_model": ["stock.StockMaster"],
+    "user_avatar": None,
+    "topmenu_links": [
+        {"name": "Home", "url": "admin:index", "permissions": ["auth.view_user"]},
+    ],
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    "hide_apps": [],
+    "hide_models": [],
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "auth.user": "fas fa-user",
+        "auth.Group": "fas fa-users",
+        "stock.StockMaster": "fas fa-chart-line",
+        "stock.MyTrackedStock": "fas fa-star",
+        "stock.SignalCode": "fas fa-code",
+        "stock.StockAnalysisHistory": "fas fa-history",
+        "stock.StockAnalysisLatest": "fas fa-bolt",
+    },
+    "default_icon_parents": "fas fa-chevron-circle-right",
+    "default_icon_children": "fas fa-circle",
+    "related_modal_active": True,
+    "custom_css": None,
+    "custom_js": None,
+    # UI 빌더(커스터마이즈 사이드바) 숨김 처리
+    "show_ui_builder": False,
+    "changeform_format": "horizontal_tabs",
+    "changeform_format_overrides": {"auth.user": "collapsible_list", "auth.group": "vertical_tabs"},
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -150,3 +188,16 @@ STATICFILES_DIRS = [
 
 # WhiteNoise 정적 파일 캐싱 스토리지 적용
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+JAZZMIN_UI_TWEAKS = {
+    # 상단바, 사이드바, 바디 폰트 크기 축소
+    "font_size": "text-sm",
+    
+    # 얇은 네비게이션 바 적용
+    "navbar_classes": "navbar-dark bg-dark navbar-sm",
+    
+    # 테이블 여백 최소화 (데이터 밀집) 및 모바일 반응형(가로 스크롤) 강제 유지
+    "table_classes": "table-sm table-responsive", 
+    
+    "theme": "flatly", # 깔끔한 플랫 디자인 테마
+}

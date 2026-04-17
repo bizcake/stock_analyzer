@@ -1,8 +1,0 @@
-{# templates/admin/change_list.html #}
-
-{% extends "admin/change_list.html" %} {# 장고 기본 템플릿 상속 #}
-
-{% block extrahead %} {# 이 블록 안에 우리가 보낸 CSS를 넣어야 합니다 #}
-    {{ block.super }} {# 기존의 헤더 내용 유지 #}
-    {{ custom_css }}   {# 🚀 Mixin에서 보낸 커스텀 CSS 출력을 위한 구멍 #}
-{% endblock %}

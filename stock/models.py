@@ -53,6 +53,43 @@ class StockMaster(models.Model):
         ]
     def __str__(self):
         return f"{self.ticker} ({self.name_kr})"
+
+    @property
+    def tv_url(self):
+        """트레이딩뷰 차트 링크 반환"""
+        tv_base = "https://www.tradingview.com/chart/aFDVPmY7/"
+        actual_exchange = self.exchange.upper() if self.exchange else ''
+        
+        if self.market == 'COIN':
+            clean_ticker = self.ticker.replace("-USD", "").replace("KRW-", "")
+            return f"{tv_base}?symbol=BINANCE:{clean_ticker}USDT"
+        elif self.market in ['KR', 'KOSPI', 'KOSDAQ']:
+            code = self.ticker.split('.')[0]
+            return f"{tv_base}?symbol=KRX:{code}"
+        else:
+            if actual_exchange == 'NASDAQ':
+                return f"{tv_base}?symbol=NASDAQ:{self.ticker}"
+            elif actual_exchange == 'AMEX':
+                return f"{tv_base}?symbol=AMEX:{self.ticker}"
+            else:
+                return f"{tv_base}?symbol=NYSE:{self.ticker}"
+
+    @property
+    def naver_url(self):
+        """네이버 금융 차트 링크 반환"""
+        actual_exchange = self.exchange.upper() if self.exchange else ''
+        
+        if self.market == 'COIN':
+            clean_ticker = self.ticker.replace("-USD", "").replace("KRW-", "")
+            return f"https://m.stock.naver.com/fchart/crypto/UPBIT/{clean_ticker}"
+        elif self.market in ['KR', 'KOSPI', 'KOSDAQ']:
+            code = self.ticker.split('.')[0]
+            return f"https://m.stock.naver.com/fchart/domestic/stock/{code}"
+        else:
+            if actual_exchange == 'NASDAQ':
+                return f"https://m.stock.naver.com/fchart/foreign/stock/{self.ticker}.O"
+            else:
+                return f"https://m.stock.naver.com/fchart/foreign/stock/{self.ticker}"
     
 # 2. 내가 대시보드에 등록한 관심 종목
 class MyTrackedStock(models.Model):

@@ -9,55 +9,6 @@ from import_export.widgets import ForeignKeyWidget
 # from import_export.admin import ImportExportModelAdmin
 from .models import StockMaster, MyTrackedStock, SignalCode, StockAnalysisHistory, StockAnalysisLatest
 
-class HorizontalFilterMixin:
-    """
-    관리자 페이지의 세로 필터를 가로 바 형태로 변경해주는 믹스인
-    """
-    def changelist_view(self, request, extra_context=None):
-        extra_context = extra_context or {}
-        extra_context['custom_css'] = mark_safe("""
-            <style>
-                #changelist.filtered { margin-right: 0 !important; }
-                #changelist-filter {
-                    position: static !important; width: 100% !important;
-                    float: none !important; display: flex !important;
-                    flex-wrap: wrap !important; background: #f8f9fa !important;
-                    border: 1px solid #eee !important; margin-bottom: 15px !important;
-                    padding: 10px !important; border-radius: 8px;
-                }
-                #changelist-filter h2 { display: none; }
-                #changelist-filter h3 { 
-                    margin: 0 15px 0 0 !important; font-size: 13px !important;
-                    display: flex; align-items: center; color: #666;
-                }
-                #changelist-filter ul { 
-                    display: flex !important; flex-wrap: wrap !important; 
-                    margin: 0 30px 5px 0 !important; padding: 0 !important;
-                    list-style: none !important; gap: 5px;
-                }
-                #changelist-filter li { margin: 0 !important; padding: 0 !important; }
-                #changelist-filter li a {
-                    padding: 3px 10px !important; border: 1px solid #ddd !important;
-                    border-radius: 15px !important; background: #fff !important;
-                    font-size: 12px !important; white-space: nowrap; display: block;
-                }
-                #changelist-filter li.selected a {
-                    background: #79aec8 !important; color: white !important;
-                    border-color: #79aec8 !important; font-weight: bold;
-                }
-                #changelist-filter li a:hover { background: #eee !important; }
-                /* 🚀 --- 하단 페이징(Paginator) 깨짐 복구 CSS 추가 --- 🚀 */
-                .paginator { padding-top: 10px !important; display: flex !important; align-items: center; }
-                .paginator ul { 
-                    display: flex !important; flex-wrap: wrap !important; gap: 4px !important; 
-                    list-style: none !important; margin: 0 !important; padding: 0 !important; 
-                }
-                .paginator ul li { list-style: none !important; margin: 0 !important; padding: 0 !important; }
-                .paginator ul li::before { content: none !important; } /* 네모 불릿 점 제거 */
-            </style>
-        """)
-        return super().changelist_view(request, extra_context=extra_context)
-    
 # --- 기존 StockMaster 설정 --- (유지)
 class StockMasterResource(resources.ModelResource):
     class Meta:
@@ -66,7 +17,7 @@ class StockMasterResource(resources.ModelResource):
         fields = ('ticker', 'name_kr', 'name_en', 'market')
 
 @admin.register(StockMaster)
-class StockMasterAdmin(HorizontalFilterMixin, admin.ModelAdmin):
+class StockMasterAdmin(admin.ModelAdmin):
     resource_class = StockMasterResource
     # 1. 목록에 표시할 컬럼 지정 (exchange 추가)
     list_display = ('ticker', 'name_kr', 'market', 'exchange')
@@ -95,7 +46,7 @@ class MyTrackedStockResource(resources.ModelResource):
 
 # --- 2. MyTrackedStock용 어드민 설정 ---
 @admin.register(MyTrackedStock)
-class MyTrackedStockAdmin(HorizontalFilterMixin, admin.ModelAdmin):
+class MyTrackedStockAdmin(admin.ModelAdmin):
     
     # 관련 모델을 한 번에 가져오도록 설정 (JOIN 수행)
     list_select_related = ('stock',)
@@ -124,7 +75,7 @@ class MyTrackedStockAdmin(HorizontalFilterMixin, admin.ModelAdmin):
         return obj.stock.market
 
 @admin.register(SignalCode)
-class SignalCodeAdmin(HorizontalFilterMixin, admin.ModelAdmin):
+class SignalCodeAdmin(admin.ModelAdmin):
     # 1. 목록에 표시할 필드 (코드, 이름, 설명)
     list_display = ('code', 'name', 'description')
     
@@ -146,7 +97,7 @@ class SignalCodeAdmin(HorizontalFilterMixin, admin.ModelAdmin):
         return form
     
 @admin.register(StockAnalysisHistory)
-class StockAnalysisHistoryAdmin(HorizontalFilterMixin, admin.ModelAdmin):
+class StockAnalysisHistoryAdmin(admin.ModelAdmin):
     
     # 관련 모델을 한 번에 가져오도록 설정 (JOIN 수행)
     list_select_related = ('stock',)
@@ -163,6 +114,9 @@ class StockAnalysisHistoryAdmin(HorizontalFilterMixin, admin.ModelAdmin):
     # 최신 데이터가 위로 오도록 정렬
     ordering = ('-date',)
 
+    # 🚀 필터를 드롭다운으로 변경
+    list_filter_dropdown = True
+
     # 관계형 모델(StockMaster)의 필드를 가져오기 위한 메서드
     @admin.display(description='티커')
     def get_ticker(self, obj):
@@ -178,8 +132,8 @@ class SignalNameFilter(admin.SimpleListFilter):
     parameter_name = 'signal_code'
 
     def lookups(self, request, model_admin):
-        # 🚀 .order_by('code')를 추가하여 d01, d02... 순서로 정렬
-        codes = SignalCode.objects.all().order_by('code').values_list('code', 'name')
+        # 🚀 .order_by('code')로 정렬하고, 'p'로 시작하는 봉 시그널은 필터에서 제외
+        codes = SignalCode.objects.exclude(code__startswith='p').order_by('code').values_list('code', 'name')
         return [(code, name) for code, name in codes]
 
     def queryset(self, request, queryset):
@@ -187,22 +141,46 @@ class SignalNameFilter(admin.SimpleListFilter):
             return queryset.filter(signal_code=self.value())
         return queryset
 
+# 1. 보유 여부로 필터링하기 위한 커스텀 필터 클래스
+class TrackedFilter(admin.SimpleListFilter):
+    title = '보유 여부'
+    parameter_name = 'is_tracked'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('yes', '내 보유 종목'),
+            ('no', '그 외 종목'),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'yes':
+            return queryset.filter(stock__mytrackedstock__isnull=False).distinct()
+        if self.value() == 'no':
+            return queryset.filter(stock__mytrackedstock__isnull=True)
+        return queryset
+
 @admin.register(StockAnalysisLatest)
-class StockAnalysisLatestAdmin(HorizontalFilterMixin, admin.ModelAdmin):
+class StockAnalysisLatestAdmin(admin.ModelAdmin):
+    change_list_template = 'admin/change_list2.html'
     # 관련 모델을 한 번에 가져오도록 설정 (JOIN 수행)
     list_select_related = ('stock',)
-    list_display = ('get_name', 'get_signal_name','p_name', 'go_chart', 'get_updated_at')
-    ordering = ('signal_code', 'p_code', '-updated_at')
+    list_display = ('get_name', 'get_signal_name','p_name', 'go_chart')
+    # , 'get_updated_at'
+    ordering = ('signal_code', 'p_code', 'p_name', '-updated_at')
     # 🚀 액션 드롭다운 및 좌측 체크박스 비활성화
     actions = None
-    
+
     list_filter = (
-        SignalNameFilter,
+        TrackedFilter, # 🚀 여기에 커스텀 보유 필터 추가
         'stock__market',
     )
 
+    # 🚀 Jazzmin 기능으로 필터를 드롭다운으로 변경
+    # (기존 HorizontalFilterMixin의 자바스크립트 기능을 대체합니다)
+    list_filter_dropdown = True
+
     # 3. 티커나 종목명으로 검색 가능 (관계형 검색)
-    search_fields = ('^stock__ticker', '^stock__name_kr')    
+    search_fields = ('^stock__ticker', '^stock__name_kr')
     show_full_result_count = False
     list_per_page = 50
 
@@ -244,38 +222,10 @@ class StockAnalysisLatestAdmin(HorizontalFilterMixin, admin.ModelAdmin):
         # StockMasterAdmin이면 obj 자체가 stock이고, 
         # StockAnalysisLatestAdmin이면 obj.stock을 참조해야 하므로 분기 처리
         stock = obj if hasattr(obj, 'market') else obj.stock
-        
-        market = stock.market
-        actual_exchange = stock.exchange.upper() if stock.exchange else ''
-        tv_base = "https://www.tradingview.com/chart/aFDVPmY7/"
-
-        # 1. 코인 처리
-        if market == 'COIN':
-            clean_ticker = stock.ticker.replace("-USD", "").replace("KRW-", "")
-            tv_url = f"{tv_base}?symbol=BINANCE:{clean_ticker}USDT"
-            naver_url = f"https://m.stock.naver.com/fchart/crypto/UPBIT/{clean_ticker}"
-            
-        # 2. 한국 주식 처리
-        elif market in ['KR', 'KOSPI', 'KOSDAQ']: 
-            code = stock.ticker.split('.')[0]
-            tv_url = f"{tv_base}?symbol=KRX:{code}"
-            naver_url = f"https://m.stock.naver.com/fchart/domestic/stock/{code}"
-            
-        # 3. 미국 주식 처리
-        else: 
-            if actual_exchange == 'NASDAQ':
-                tv_url = f"{tv_base}?symbol=NASDAQ:{stock.ticker}"
-                naver_url = f"https://m.stock.naver.com/fchart/foreign/stock/{stock.ticker}.O"
-            elif actual_exchange == 'AMEX':
-                tv_url = f"{tv_base}?symbol=AMEX:{stock.ticker}"
-                naver_url = f"https://m.stock.naver.com/fchart/foreign/stock/{stock.ticker}"
-            else:
-                tv_url = f"{tv_base}?symbol=NYSE:{stock.ticker}"
-                naver_url = f"https://m.stock.naver.com/fchart/foreign/stock/{stock.ticker}"
 
         # HTML 버튼 렌더링
         return format_html(
             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#2196F3; color:white; border-radius:4px; font-size:11px; text-decoration:none; margin-right:4px;"> T </a>'
             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
-            tv_url, naver_url
+            stock.tv_url, stock.naver_url
         )

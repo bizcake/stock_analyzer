@@ -1,9 +1,9 @@
 import logging
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.utils import timezone
-from .models import StockMaster, MyTrackedStock, StockAnalysisLatest, StockAnalysisHistory
-from .utils import analyze_batch_signals
+from ..stock.models import StockMaster, MyTrackedStock, StockAnalysisLatest, StockAnalysisHistory
+from ..stock.utils import analyze_batch_signals
 
 logger = logging.getLogger(__name__)
 
@@ -54,26 +54,35 @@ class StockAnalyzerService:
                 analysis_date = auto_date # KST 기준 날짜 사용
                 logger.info(f"🕒 자동 마켓 감지: {target_markets} (기준일: {analysis_date})")
 
-            # 내 관심 종목 중 해당 마켓인 것들만 수집
-            query = MyTrackedStock.objects.select_related('stock').filter(stock__market__in=target_markets)
-            target_tickers = [item.stock.ticker for item in query]
+            # 내 관심 종목 및 지수 종목(is_index_member=True) 수집 (중복 제거)
+            my_tickers = set(MyTrackedStock.objects.filter(stock__market__in=target_markets).values_list('stock__ticker', flat=True))
+            index_tickers = set(StockMaster.objects.filter(market__in=target_markets, is_exchange=True).values_list('ticker', flat=True))
+            target_tickers = list(my_tickers | index_tickers)
 
         if not target_tickers:
             logger.warning("분석할 티커가 없습니다.")
             return 0
 
-        # 2. 배치 분석 호출
-        batch_results = analyze_batch_signals(target_tickers)
-        if not batch_results:
-            logger.error("분석 결과가 비어있습니다.")
-            return 0
-
         processed_count = 0
+        batch_size = 50
 
-        # 3. DB 저장 (Latest 및 History)
-        for ticker, res in batch_results.items():
-            try:
+        # 2. 배치 분석 및 DB 저장
+        for i in range(0, len(target_tickers), batch_size):
+            batch = target_tickers[i:i + batch_size]
+            batch_results = analyze_batch_signals(batch)
+            
+            if not batch_results:
+                logger.warning(f"일부 배치 분석 결과가 비어있습니다. (배치: {batch})")
+                continue
+
+            # 3. DB 저장 (Latest 및 History)
+            for ticker, res in batch_results.items():
+                # try:
                 stock = StockMaster.objects.get(ticker=ticker)
+                # except StockMaster.DoesNotExist:
+                #     logger.error(f"티커 {ticker}를 찾을 수 없습니다.")
+                # except Exception as e:
+                #     logger.error(f"[{ticker}] 저장 중 에러: {e}")
                 
                 # Latest 업데이트
                 StockAnalysisLatest.objects.update_or_create(
@@ -104,9 +113,10 @@ class StockAnalyzerService:
                     }
                 )
                 processed_count += 1
-            except StockMaster.DoesNotExist:
-                logger.error(f"티커 {ticker}를 찾을 수 없습니다.")
-            except Exception as e:
-                logger.error(f"[{ticker}] 저장 중 에러: {e}")
+
+        # 4. 오래된 히스토리 정리 (6개월 전 데이터 삭제)
+        if not tickers:  # 수동 단건 분석이 아닐 때만 실행
+            six_months_ago = analysis_date - timedelta(days=180)
+            StockAnalysisHistory.objects.filter(date__lt=six_months_ago).delete()
 
         return processed_count

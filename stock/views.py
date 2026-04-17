@@ -13,10 +13,6 @@ import os
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 from .models import StockMaster, MyTrackedStock, SignalCode, StockAnalysisLatest, StockAnalysisHistory
-from .utils import analyze_batch_signals
-from .services import StockAnalyzerService
-
-# from .utils import get_category_briefing, get_signals_batch
 
 import subprocess
 from django.contrib import messages
@@ -111,7 +107,7 @@ def stock_analysis_view(request):
                 target_tickers = list(set(target_tickers))
 
                 # 3. 배치 분석 실행 (딱 한 번만 호출)
-                all_signals = ''#get_signals_batch(target_tickers)
+                all_signals = {} # 더 이상 사용하지 않는 레거시 뷰의 에러 방지용
 
                 # 4. 배치 결과를 기존 results 구조에 매핑
                 for category, ticker_dict in stocks_to_analyze.items():
@@ -162,104 +158,6 @@ def stock_analysis_view(request):
         'target_category': target_category
     })
 
-def api_category_briefing(request):
-    category = request.GET.get('category')
-    user_name = request.GET.get('user_name', '현욱')
-
-    # 기존 분석 결과 파일에서 해당 카테고리 데이터 로드
-    result_file = os.path.join(settings.BASE_DIR, f'result_{user_name}.json')
-
-    try:
-        with open(result_file, 'r', encoding='utf-8') as f:
-            all_results = json.load(f)
-            stock_list = all_results.get(category, [])
-
-        if not stock_list:
-            return JsonResponse({"status": "error", "message": "분석된 종목 데이터가 없습니다."})
-
-        briefing = get_category_briefing(category, stock_list)
-        return JsonResponse({"status": "success", "briefing": briefing})
-    except Exception as e:
-        return JsonResponse({"status": "error", "message": str(e)})
-
-# 프로젝트 절대 경로 및 스크립트 파일명 설정
-PROJECT_DIR = "/home/batteryz1999/stocks/stock/"
-BOT_SCRIPT = "telegram_notifier.py"
-LOG_FILE = os.path.join(PROJECT_DIR, "bot.log") # 💡 로그 파일 경로 추가
-
-def check_bot_is_running():
-    """ps 명령어로 실제 프로세스가 메모리에 떠 있는지 직접 검사"""
-    try:
-        # grep -v grep: grep 명령어 자체의 프로세스는 검색 결과에서 제외하는 필수 테크닉
-        command = f"ps aux | grep {BOT_SCRIPT} | grep -v grep"
-        output = subprocess.check_output(command, shell=True, text=True)
-
-        # 출력 결과가 있다면 프로세스가 돌고 있다는 뜻
-        return len(output.strip()) > 0
-
-    except subprocess.CalledProcessError:
-        # grep이 매칭되는 프로세스를 찾지 못하면 에러(종료 코드 1)를 발생시킵니다.
-        return False
-
-def bot_dashboard(request):
-    """봇 상태 확인 대시보드 화면"""
-    is_running = check_bot_is_running()
-
-    # 💡 로그 파일 읽어오기 로직 추가
-    logs = "아직 기록된 로그가 없습니다."
-    if os.path.exists(LOG_FILE):
-        try:
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-                # 최신 로그 20줄만 잘라서 화면에 전달 (파일이 커져도 문제없음)
-                logs = "".join(lines[-20:]) if lines else "로그가 비어있습니다."
-        except Exception as e:
-            logs = f"로그 파일을 읽는 중 에러가 발생했습니다: {e}"
-
-    return render(request, "stock/bot_dashboard.html", {"is_running": is_running,'logs':logs})
-
-def start_bot(request):
-    """봇을 백그라운드로 실행"""
-    if not check_bot_is_running():
-        try:
-            # 절대 경로 조합
-            script_path = os.path.join(PROJECT_DIR, BOT_SCRIPT)
-            # 💡 로그 파일을 'a' (이어쓰기) 모드로 열기
-            log_out = open(LOG_FILE, "a", encoding="utf-8")
-
-            subprocess.Popen(
-                ["/home/batteryz1999/.venv/bin/python", script_path],
-                cwd=PROJECT_DIR,
-                stdout=log_out,
-                stderr=log_out
-            )
-            messages.success(request, "🚀 텔레그램 봇 스케줄러를 성공적으로 시작했습니다.")
-        except Exception as e:
-            messages.error(request, f"❌ 봇 실행 실패: {e}")
-    else:
-        messages.warning(request, "⚠️ 봇이 이미 실행 중입니다.")
-
-    return redirect('stock:bot_dashboard')
-
-def stop_bot(request):
-    """pkill을 사용하여 스크립트 이름으로 프로세스 강제 종료"""
-    if check_bot_is_running():
-        try:
-            # pkill -f: 프로세스 이름이나 인자(argument)를 검색해서 종료
-            command = f"pkill -f {BOT_SCRIPT}"
-            subprocess.run(command, shell=True, check=True)
-
-            # (선택) 중지 시 로그에 중지되었다는 기록 남기기
-            with open(LOG_FILE, "a", encoding="utf-8") as log_out:
-                log_out.write("\n[System] 봇 프로세스가 강제 종료되었습니다.\n")
-
-            messages.success(request, "🛑 텔레그램 봇이 완전히 중지되었습니다.")
-        except subprocess.CalledProcessError:
-            messages.error(request, "❌ 봇을 중지하는 과정에서 에러가 발생했습니다.")
-
-    return redirect('bot_dashboard')
-
-
 def search_stock_api(request):
     """종목 검색 API (Ajax 용)"""
     query = request.GET.get('q', '').strip()
@@ -279,20 +177,6 @@ def search_stock_api(request):
     ]
     return JsonResponse({'results': results})
 
-# def add_tracked_stock(request, stock_id):
-#     """모니터링 대상 추가"""
-#     stock = get_object_or_404(StockMaster, id=stock_id)
-#     TrackedStock.objects.get_or_create(stock=stock)
-#     return redirect('stock:bot_dashboard') # 본인의 대시보드 URL 네임으로 변경
-
-# def remove_tracked_stock(request, stock_id):
-#     """모니터링 대상 삭제"""
-#     TrackedStock.objects.filter(stock_id=stock_id).delete()
-#     return redirect('stock:bot_dashboard')
-
-
-from .models import StockMaster, MyTrackedStock, StockAnalysisLatest, SignalCode
-
 def dashboard_view(request):
     """DB에 저장된 최신 분석 결과를 바로 조회하여 전달 (스케줄러 연동)"""
     
@@ -303,39 +187,14 @@ def dashboard_view(request):
     my_stocks = MyTrackedStock.objects.select_related('stock', 'stock__latest_analysis').all()
 
     categorized_stocks = {'KR': [], 'US': [], 'COIN': []}
-    tv_base = "https://www.tradingview.com/chart/aFDVPmY7/"
 
     for item in my_stocks:
         stock = item.stock
         analysis = getattr(stock, 'latest_analysis', None)
 
         market = stock.market
-        actual_exchange = stock.exchange.upper() if stock.exchange else ''
-
-        if market == 'COIN':
-            clean_ticker = stock.ticker.replace("-USD", "").replace("KRW-", "")
-            trend_url = f"{tv_base}?symbol=BINANCE:{clean_ticker}USDT"
-            naver_url = f"https://m.stock.naver.com/fchart/crypto/UPBIT/{clean_ticker}"
-            
-        elif market in ['KR', 'KOSPI', 'KOSDAQ']: # 혹시 모를 기존 KR 데이터 호환
-            code = stock.ticker.split('.')[0]
-            trend_url = f"{tv_base}?symbol=KRX:{code}"
-            naver_url = f"https://m.stock.naver.com/fchart/domestic/stock/{code}"
-            
-        else: 
-            # 3. 🚀 대망의 미국 주식(US) 링크 완벽 분기 처리
-            if actual_exchange == 'NASDAQ':
-                # 나스닥은 네이버에 .O 를 붙임
-                trend_url = f"{tv_base}?symbol=NASDAQ:{stock.ticker}"
-                naver_url = f"https://m.stock.naver.com/fchart/foreign/stock/{stock.ticker}.O"
-            elif actual_exchange == 'AMEX':
-                # 아멕스는 트레이딩뷰 AMEX 심볼 사용, 네이버는 .O 안 붙임
-                trend_url = f"{tv_base}?symbol=AMEX:{stock.ticker}"
-                naver_url = f"https://m.stock.naver.com/fchart/foreign/stock/{stock.ticker}"
-            else:
-                # NYSE 및 그 외 거래소는 범용적으로 NYSE 심볼 사용, 네이버는 .O 안 붙임
-                trend_url = f"{tv_base}?symbol=NYSE:{stock.ticker}"
-                naver_url = f"https://m.stock.naver.com/fchart/foreign/stock/{stock.ticker}"
+        trend_url = stock.tv_url
+        naver_url = stock.naver_url
 
         # --- 시그널 데이터 및 딕셔너리 매핑 (기존과 완전히 동일) ---
         code = analysis.signal_code if analysis and analysis.signal_code else 'd01'
@@ -365,83 +224,3 @@ def dashboard_view(request):
         categorized_stocks[mkt].sort(key=lambda x: x['signal_code'])
 
     return render(request, 'stock/dashboard.html', {'categorized_stocks': categorized_stocks})
-
-@csrf_exempt
-def api_run_batch_analysis(request):
-    """
-    모든 관심 종목을 야후에서 한 번에 가져와서 일괄 분석 및 DB 저장 (Service Layer 활용)
-    """
-    if request.method == "POST":
-        target_market = request.POST.get('market') # 'KR', 'US', 'COIN'
-        
-        # 1. 서비스 호출하여 분석 및 DB 저장 수행
-        # 특정 마켓이 지정되면 해당 마켓만, 아니면 전체 관심 종목 분석
-        success_count = StockAnalyzerService.run_analysis(market=target_market)
-
-        if success_count == 0:
-            return JsonResponse({"status": "error", "message": "분석할 종목이 없거나 데이터 다운로드에 실패했습니다."})
-
-        # 2. 화면 갱신을 위해 최신 분석 결과를 다시 읽어옴
-        # (주의: StockAnalyzerService에서 이미 DB 업데이트를 완료함)
-        my_stocks = MyTrackedStock.objects.select_related('stock', 'stock__latest_analysis')
-        if target_market:
-            my_stocks = my_stocks.filter(stock__market=target_market)
-            
-        response_data = {}
-        for item in my_stocks:
-            analysis = getattr(item.stock, 'latest_analysis', None)
-            if analysis:
-                response_data[item.stock.id] = {
-                    't_signal': analysis.t_signal,
-                    'n_signal': analysis.n_signal,
-                    'c_signal': analysis.c_signal,
-                    'p_name': analysis.p_name,
-                    'up_days': analysis.up_days,
-                    'signal_code': analysis.signal_code,
-                }
-
-        return JsonResponse({
-            "status": "success", 
-            "results": response_data,
-            "message": f"총 {success_count}개 종목 분석 및 DB 저장 완료!"
-        })
-    
-# 🟢 1. [조회] 및 [마스터 DB 강제 등록]
-@csrf_exempt
-def api_search_and_add(request):
-    if request.method == "POST":
-        action = request.POST.get('action')
-        
-        # [조회 기능] 팝업에서 검색어 입력 시
-        if action == 'search':
-            keyword = request.POST.get('keyword', '').strip()
-            # 한글명 또는 티커로 검색
-            stocks = StockMaster.objects.filter(name_kr__icontains=keyword) | StockMaster.objects.filter(ticker__icontains=keyword)
-            data = [{"id": s.id, "ticker": s.ticker, "name": s.name_kr, "market": s.market} for s in stocks[:10]]
-            return JsonResponse({"results": data})
-            
-        # [등록 기능 1] 검색해도 안 나올 때, 마스터 DB에 아예 새로 등록
-        elif action == 'add_master':
-            ticker = request.POST.get('ticker')
-            name = request.POST.get('name')
-            market = request.POST.get('market')
-            stock, created = StockMaster.objects.get_or_create(ticker=ticker, defaults={'name_kr': name, 'market': market})
-            return JsonResponse({"status": "success", "id": stock.id})
-
-# 🔵 2. 내 관심종목 [등록] 및 [삭제]
-@csrf_exempt
-def api_manage_tracked(request):
-    if request.method == "POST":
-        stock_id = request.POST.get('stock_id')
-        action = request.POST.get('action')
-        stock = StockMaster.objects.get(id=stock_id)
-        
-        # [등록 기능 2] 검색된 종목을 '내 대시보드'에 추가할 때
-        if action == 'add':
-            MyTrackedStock.objects.get_or_create(stock=stock)
-            
-        # [삭제 기능] 대시보드 화면에서 '삭제' 버튼을 눌렀을 때
-        elif action == 'delete':
-            MyTrackedStock.objects.filter(stock=stock).delete()
-            
-        return JsonResponse({"status": "success"})

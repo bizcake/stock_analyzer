@@ -1,0 +1,30 @@
+# AI 어시스턴트의 컨텍스트에서 제외할 파일과 디렉토리를 지정합니다.
+
+# Python 가상환경
+.venv
+venv
+
+# Git
+.git
+
+# Node.js 의존성
+node_modules
+
+# Python 캐시
+__pycache__/
+*.pyc
+
+# Django 정적/미디어 파일 및 DB
+/staticfiles/
+/media/
+db.sqlite3
+
+# 비밀 정보
+.env
+
+# 각종 ignore 파일
+.gitignore
+.gcloudignore
+.dockerignore
+.cursorignore
+.aiexclude

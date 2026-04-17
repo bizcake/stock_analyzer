@@ -1,0 +1,34 @@
+/* static/css/compact_admin.css */
+
+/* 1. 테이블 셀 여백 축소 (가장 중요) */
+.unfold-table .unfold-td, 
+.unfold-table .unfold-th {
+    padding-top: 0.25rem !important;    /* 위쪽 여백 최소화 */
+    padding-bottom: 0.25rem !important; /* 아래쪽 여백 최소화 */
+    padding-left: 0.5rem !important;   /* 좌우 여백 축소 */
+    padding-right: 0.5rem !important;
+}
+
+/* 2. 행(Row) 높이 축소 */
+.unfold-table tr {
+    height: auto !important;
+}
+
+/* 3. 폰트 크기 미세 축소 */
+.unfold-table {
+    font-size: 0.875rem !important; /* 필요시 조정 */
+}
+
+/* 4. 이미지 2의 커스텀 버튼(T, N) 크기 조정 */
+.unfold-td a.button, 
+.unfold-td span.isotype-badge {
+    padding: 2px 6px !important;
+    font-size: 0.75rem !important;
+    margin-right: 2px !important;
+}
+
+/* 5. 상단 필터 영역 조밀하게 */
+.unfold-filter-horizontal {
+    gap: 0.5rem !important;
+    padding: 0.5rem !important;
+}

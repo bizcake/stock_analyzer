@@ -1,0 +1,29 @@
+/* static/css/remove_space.css */
+
+/* 검색창 영역(Toolbar) 하단 여백 강제 제거 */
+#toolbar {
+    margin-bottom: 5px !important;
+    padding-bottom: 0 !important;
+}
+
+/* 폼 컨테이너 및 결과 테이블(Results) 상단 여백 강제 제거 */
+#changelist-form, 
+#changelist-form > div,
+.results {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+}
+
+/* 만약 비어있는 필터 영역이 투명하게 공간을 차지하고 있다면 강제 숨김 */
+.changelist-filter-row,
+#changelist-filter {
+    display: none !important; 
+}
+/* 데이터 추가(Add) 버튼 크기 강제 축소 */
+#content-main a[href*="/add/"].btn,
+.object-tools a.btn {
+    padding: 4px 10px !important;    /* 상하, 좌우 여백 축소 */
+    font-size: 12px !important;      /* 폰트 크기 축소 */
+    line-height: 1.5 !important;
+    height: auto !important;
+}
