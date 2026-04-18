@@ -22,6 +22,10 @@ steps:
       - 'managed'
       - '--memory'
       - '1Gi'
+      - '--timeout'   # ⬅️ 시작 지연 에러 방지용 타임아웃 추가
+      - '300s'
+      - '--port'      # ⬅️ Django 앱이 8080이 아닌 다른 포트(예: 8000)를 사용할 경우 명시
+      - '8000'
       - '--allow-unauthenticated'
 
   # 4. Cloud Functions (stock-analyzer-function) 배포
