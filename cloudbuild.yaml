@@ -7,7 +7,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA']
 
-  # 3. Cloud Run (Django 앱) 배포
+# 3. Cloud Run (Django 앱) 배포
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -22,12 +22,15 @@ steps:
       - 'managed'
       - '--memory'
       - '1Gi'
-      - '--timeout'   # ⬅️ 시작 지연 에러 방지용 타임아웃 추가
+      - '--timeout'
       - '300s'
-      - '--port'      # ⬅️ Django 앱이 8080이 아닌 다른 포트(예: 8000)를 사용할 경우 명시
+      - '--port'
       - '8000'
       - '--allow-unauthenticated'
-
+      # ⬅️ 누락되었던 환경변수 주입 설정 추가
+      - '--update-env-vars'
+      - '^,^DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
+      
   # 4. Cloud Functions (stock-analyzer-function) 배포
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
