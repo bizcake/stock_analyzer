@@ -1,12 +1,14 @@
+# main.py
+import os
 import pytz
 from datetime import datetime, timedelta
-from django.utils import timezone
-from .models import StockMaster, MyTrackedStock, StockAnalysisLatest, StockAnalysisHistory
-from .utils import (
+from stock.models import StockMaster, MyTrackedStock, StockAnalysisLatest, StockAnalysisHistory
+from .signals import (
     get_final_signal_with_code, analyze_candle_pattern, 
+)
+from .indicators import (
     calc_hma, calc_wavetrend, calc_macd
 )
-import os
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -149,13 +151,12 @@ class MarketAnalyzerService:
     def run_analysis(cls):
         """전체 분석 프로세스 실행"""
         target_markets, today_date = cls.get_target_markets()
-        print(f"🕒 분석 시작 (KST): {datetime.now()} | 대상 시장: {target_markets}")
+        # print(f"🕒 분석 시작 (KST): {datetime.now()} | 대상 시장: {target_markets}")
 
         # 1. 대상 티커 수집 (관심종목 + 지수 종목)
         my_list = set(MyTrackedStock.objects.filter(
             stock__market__in=target_markets
         ).values_list('stock__ticker', flat=True))
-        
 
         if IS_CLOUD_RUN:
             index_list = set(StockMaster.objects.filter(
@@ -163,6 +164,9 @@ class MarketAnalyzerService:
                 index_type__isnull=False  # 🚀 여기가 필터링의 핵심입니다!
             ).values_list('ticker', flat=True))
         else:
+            my_list = set(MyTrackedStock.objects.filter(
+                stock__market='COIN'
+            ).values_list('stock__ticker', flat=True))
             index_list = set([])
 
         all_tickers = list(my_list | index_list)

@@ -1,0 +1,41 @@
+# function.gcloudignore
+# Cloud Functions 배포 시 제외할 파일 목록 (화면 및 웹 관련 소스 제외)
+
+.git
+.venv
+.gitignore
+.gcloudignore
+.env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# [제외] Django 웹 화면 관련
+static/
+media/
+templates/
+staticfiles/
+stock/templates/
+stock/views.py
+stock/urls.py
+stock/admin.py
+stock/admin_resources.py
+manage.py
+
+# [제외] 기타 불필요한 파일
+backup/
+load_stocks.py
+setup_cicd.sh
+deploy_app.sh
+push_deploy.sh
+Dockerfile
+cloudbuild.yaml
+README.md
+
+# [유지] 아래 파일들은 배포에 포함됩니다.
+# main.py
+# requirements.txt
+# analyzer/
+# stocks/ (설정파일)
+# stock/models.py, apps.py
