@@ -58,43 +58,6 @@
     }
 
     /* ==========================================
-       3. 높이(32px) 및 너비(90px/100px) 고정
-       ========================================== */
-    #changelist-filter select,
-    #changelist-search input[type="text"],
-    #changelist-search button,
-    #change-list-filters a.btn {
-        height: 32px !important;
-        min-height: 32px !important;
-        padding: 0 10px !important;
-        font-size: 13px !important;
-        line-height: normal !important;
-        box-sizing: border-box !important;
-        white-space: nowrap !important; /* 두 줄 쪼개짐 방지 */
-    }
-
-    /* Select2(드롭다운 플러그인) 높이 및 수직 중앙 정렬 보정 */
-    .select2-container .select2-selection--single {
-        height: 32px !important;
-        display: flex !important;
-        align-items: center !important;
-    }
-    .select2-selection__rendered {
-        line-height: normal !important;
-        padding-top: 0 !important;
-    }
-
-    /* 입력창 및 셀렉트 박스 너비 고정 */
-    #changelist-search input[type="text"] { 
-        width: 100px !important; 
-        min-width: 100px !important;
-    }
-    #changelist-filter select, .select2-container { 
-        width: 100px !important; 
-        min-width: 100px !important;
-    }
-
-    /* ==========================================
        4. 모바일 환경 대응
        ========================================== */
     @media (max-width: 768px) {
@@ -135,40 +98,25 @@
         align-items: center !important;
     }
 
-    /* 셀렉트 박스 너비 확대 (150px) */
-    #changelist-filter select,
-    #changelist-filter .select2-container {
-        width: 150px !important; 
-        min-width: 150px !important;
-    }
-
-    /* 검색창 너비 확대 (200px) */
-    #changelist-search input[type="text"] {
-        width: 150px !important; 
-        min-width: 150px !important;
-        flex-grow: 0 !important;
-    }
-
-    /* 검색 버튼을 우측 끝으로 강제 이동 (float: right 효과) 및 버튼 너비 확대 */
-    #changelist-search button {
-        margin-left: auto !important; /* 남은 빈 공간을 좌측 마진으로 밀어내어 우측 끝에 고정 */
-        padding: 0 25px !important;   /* 버튼 좌우 여백을 늘려 더 넓게 */
-        flex: 0 0 auto !important;
-    }
-
     /* ==========================================
-       3. 높이(32px) 고정 및 수직 중앙 정렬 보정
-       ========================================== */
+    3. 높이(32px) 고정 및 수직 중앙 정렬 보정
+    ========================================== */
     #changelist-filter select,
     #changelist-search input[type="text"],
     #changelist-search button,
-    .object-tools a.btn {
+    #change-list-filters a.btn {
         height: 32px !important;
         min-height: 32px !important;
+        padding: 0 10px !important;
         font-size: 13px !important;
         line-height: normal !important;
         box-sizing: border-box !important;
-        white-space: nowrap !important;
+        white-space: nowrap !important; /* 두 줄 쪼개짐 방지 */
+    }
+
+    #changelist-search button {
+        margin-left: auto !important; /* 남은 빈 공간을 좌측 마진으로 밀어내어 우측 끝에 고정 */
+        flex: 0 0 auto !important;
     }
 
     /* Select2 플러그인 높이 및 텍스트 정렬 보정 */
@@ -181,6 +129,18 @@
         line-height: normal !important;
         padding-top: 0 !important;
         padding-left: 10px !important;
+    }
+
+    /* 입력창 및 셀렉트 박스 너비 고정 */
+    #changelist-search input[type="text"] {
+        width: 110px !important; 
+        min-width: 110px !important;
+        flex-grow: 0 !important;
+    }
+
+    #changelist-filter select, .select2-container { 
+        width: 90px !important; 
+        min-width: 90px !important;
     }
 
 </style>
