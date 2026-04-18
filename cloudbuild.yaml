@@ -53,6 +53,7 @@ steps:
       - '--set-env-vars'
       - 'DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,GEMINI_API_KEY=$_GEMINI_API_KEY,TELEGRAM_BOT_TOKEN=$_TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID=$_TELEGRAM_CHAT_ID,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
 
+
 # Cloud Functions 배포 단계 (예시)
   # - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   #   entrypoint: gcloud
