@@ -30,7 +30,7 @@ steps:
       # ⬅️ 누락되었던 환경변수 주입 설정 추가
       - '--update-env-vars'
       - '^,^DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
-      
+
   # 4. Cloud Functions (stock-analyzer-function) 배포
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
@@ -52,6 +52,19 @@ steps:
       - '540s'
       - '--set-env-vars'
       - 'DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,GEMINI_API_KEY=$_GEMINI_API_KEY,TELEGRAM_BOT_TOKEN=$_TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID=$_TELEGRAM_CHAT_ID,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
+
+# Cloud Functions 배포 단계 (예시)
+  # - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  #   entrypoint: gcloud
+  #   args:
+  #     - 'functions'
+  #     - 'deploy'
+  #     - 'stock-analyzer-function'
+  #     # ... (기존 설정 유지) ...
+  #     - '--timeout=300s'
+  #     # ⬅️ 함수에도 DB 접속 등을 위한 환경 변수 주입 추가
+  #     - '--set-env-vars'
+  #     - 'DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
 
 images:
   - 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA'
