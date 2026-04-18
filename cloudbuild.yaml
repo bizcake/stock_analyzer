@@ -1,5 +1,5 @@
 steps:
-  # 1. Cloud Run을 위한 Docker 이미지 빌드
+  # 1. Cloud Run을 위한 Docker 이미지 빌드 (Dockerfile 내에서 requirements_web.txt 사용)
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA', '.']
 
@@ -7,7 +7,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA']
 
-# 3. Cloud Run (Django 앱) 배포
+  # 3. Cloud Run (Django 앱) 배포
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -22,16 +22,15 @@ steps:
       - 'managed'
       - '--memory'
       - '1Gi'
-      - '--timeout'
-      - '300s'
-      - '--port'
-      - '8000'
       - '--allow-unauthenticated'
-      # ⬅️ 누락되었던 환경변수 주입 설정 추가
       - '--update-env-vars'
-      - '^,^DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
+      - 'DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
 
-  # 4. Cloud Functions (stock-analyzer-function) 배포
+  # 4. Cloud Functions 전용 requirements.txt 준비 (최적화)
+  - name: 'bash'
+    args: ['-c', 'cp requirements_cf.txt requirements.txt']
+
+  # 5. Cloud Functions (stock-analyzer-function) 배포
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -52,20 +51,6 @@ steps:
       - '540s'
       - '--set-env-vars'
       - 'DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,GEMINI_API_KEY=$_GEMINI_API_KEY,TELEGRAM_BOT_TOKEN=$_TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID=$_TELEGRAM_CHAT_ID,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
-
-
-# Cloud Functions 배포 단계 (예시)
-  # - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-  #   entrypoint: gcloud
-  #   args:
-  #     - 'functions'
-  #     - 'deploy'
-  #     - 'stock-analyzer-function'
-  #     # ... (기존 설정 유지) ...
-  #     - '--timeout=300s'
-  #     # ⬅️ 함수에도 DB 접속 등을 위한 환경 변수 주입 추가
-  #     - '--set-env-vars'
-  #     - 'DB_HOST=$_DB_HOST,DB_USER=$_DB_USER,DB_PASSWORD=$_DB_PASSWORD,DJANGO_SECRET_KEY=$_DJANGO_SECRET_KEY'
 
 images:
   - 'gcr.io/$PROJECT_ID/stocks:$COMMIT_SHA'

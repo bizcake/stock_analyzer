@@ -14,8 +14,8 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 # 4. 의존성 설치
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements_web.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # 5. 소스 코드 복사
 COPY . /app/
