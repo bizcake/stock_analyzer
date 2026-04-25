@@ -82,7 +82,9 @@ class StockMaster(models.Model):
         if self.market == 'COIN':
             clean_ticker = self.ticker.replace("-USD", "").replace("KRW-", "")
             # 암호화폐 상세 페이지
-            return f"https://m.stock.naver.com/crypto/item/{clean_ticker}"
+            
+            return f"https://m.stock.naver.com/crypto/UPBIT/{clean_ticker}/total"
+            # return f"https://m.stock.naver.com/crypto/item/{clean_ticker}"
         elif self.market in ['KR', 'KOSPI', 'KOSDAQ']:
             code = self.ticker.split('.')[0]
             # 국내 주식 상세 페이지
