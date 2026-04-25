@@ -8,6 +8,8 @@ from import_export import resources, fields
 from import_export.widgets import ForeignKeyWidget
 # from import_export.admin import ImportExportModelAdmin
 from .models import StockMaster, MyTrackedStock, SignalCode, StockAnalysisHistory, StockAnalysisLatest
+from .models import StockAnalysisLatest2
+
 
 # --- 기존 StockMaster 설정 --- (유지)
 class StockMasterResource(resources.ModelResource):
@@ -208,11 +210,6 @@ class StockAnalysisLatestAdmin(admin.ModelAdmin):
     # 5. 자동 업데이트되는 시간은 읽기 전용으로 설정
     readonly_fields = ('updated_at',)
 
-    # 관계형 모델(StockMaster)의 데이터를 가져오기 위한 헬퍼 메서드
-    # @admin.display(ordering='stock__ticker', description='티커')
-    # def get_ticker(self, obj):
-    #     return obj.stock.ticker
-
     @admin.display(ordering='stock__name_kr', description='종목명')
     def get_name(self, obj):
         return obj.stock.name_kr
@@ -229,18 +226,21 @@ class StockAnalysisLatestAdmin(admin.ModelAdmin):
             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
             stock.tv_url, stock.naver_url
         )
-    
-from django.contrib import admin
-from .models import StockAnalysisLatest2
 
 @admin.register(StockAnalysisLatest2)
 class StockAnalysisLatest2Admin(admin.ModelAdmin):
+    change_list_template = 'admin/change_list2.html'
     # 성능 최적화: StockMaster와 SignalCode2를 미리 JOIN
     # 관련 모델 사전 로드 (성능 최적화)
     list_select_related = ('stock', 'signal_code')
 
     # 🚀 액션 드롭다운 및 좌측 체크박스 비활성화
     actions = None
+    list_filter_dropdown = True
+
+    # 3. 티커나 종목명으로 검색 가능 (관계형 검색)
+    show_full_result_count = False
+    list_per_page = 50
 
     # 이미지와 동일한 컬럼 구성
     list_display = (
@@ -255,9 +255,9 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
     list_filter = (
         'signal_code', 
         'stock__market', 
-        'is_squeeze', 
-        'wt_oversold', 
-        'wt_overbought'
+        # 'is_squeeze', 
+        # 'wt_oversold', 
+        # 'wt_overbought'
     )
     search_fields = ('stock__ticker', 'stock__name_kr', 'signal')
 
