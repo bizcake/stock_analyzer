@@ -177,6 +177,9 @@ class StockAnalysisLatest(models.Model):
 
     updated_at = models.DateTimeField(auto_now=True) # 업데이트 시간
 
+    class Meta:
+        verbose_name = "종목 최신 분석"
+        
     def __str__(self):
         return f"[최신] {self.stock.ticker}"
 
@@ -246,7 +249,7 @@ class StockAnalysisLatest2(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "종목 최신 분석"
+        verbose_name = "종목 최신 분석_v2"
         indexes = [
             models.Index(fields=['priority', 'signal_code']),
             models.Index(fields=['signal_code']),
