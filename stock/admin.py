@@ -226,65 +226,73 @@ class StockAnalysisLatestAdmin(admin.ModelAdmin):
             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
             stock.tv_url, stock.naver_url
         )
-
+    
 @admin.register(StockAnalysisLatest2)
 class StockAnalysisLatest2Admin(admin.ModelAdmin):
     change_list_template = 'admin/change_list2.html'
-    # 성능 최적화: StockMaster와 SignalCode2를 미리 JOIN
-    # 관련 모델 사전 로드 (성능 최적화)
+
     list_select_related = ('stock', 'signal_code')
 
-    # 🚀 액션 드롭다운 및 좌측 체크박스 비활성화
-    actions = None
+    actions             = None
     list_filter_dropdown = True
-
-    # 3. 티커나 종목명으로 검색 가능 (관계형 검색)
     show_full_result_count = False
-    list_per_page = 50
+    list_per_page       = 50
 
-    # 이미지와 동일한 컬럼 구성
     list_display = (
-        'get_name_kr', 
-        'signal_display', 
-        'change_rate_display', 
-        'vol_ratio', 
-        'go_chart'
+        'get_name_kr',
+        'signal_display',
+        'change_rate_display',
+        'vol_ratio',
+        'go_chart',
     )
 
-    # 필터 및 검색 설정
     list_filter = (
-        'signal_code', 
-        'stock__market', 
-        # 'is_squeeze', 
-        # 'wt_oversold', 
-        # 'wt_overbought'
+        'signal_code',       # ✅ SignalCode2 FK 그대로 사용
+        'stock__market',
     )
     search_fields = ('stock__ticker', 'stock__name_kr', 'signal')
+    ordering      = ('signal_code', '-analyzed_date')
 
-    # 매수 우선 정렬 (priority 값이 클수록 상단 노출) 및 분석일자 최신순
-    ordering = ('signal_code', '-analyzed_date')
+    def get_queryset(self, request):
+        return (
+            super().get_queryset(request)
+            .select_related('stock', 'signal_code')
+        )
 
-    # 5. 상세 페이지 그룹화 (필드가 많으므로 섹션 분리)
+    def get_readonly_fields(self, request, obj=None):
+        if obj:
+            return [f.name for f in self.model._meta.fields]
+        return ['updated_at']
+
     fieldsets = (
         ('기본 정보', {
-            'fields': ('stock', 'analyzed_date', 'close_price', 'change_rate', 'volume', 'vol_ratio')
+            'fields': (
+                'stock', 'analyzed_date', 'updated_at',
+                'close_price', 'change_rate', 'volume', 'vol_ratio',
+            )
         }),
         ('분석 시그널', {
-            'fields': ('priority', 'signal_code', 'signal', 'action', 'p_code', 'p_name', 'up_days')
+            'fields': (
+                'priority', 'signal_code', 'signal',
+                'action', 'p_code', 'p_name', 'up_days',
+                't_signal', 'n_signal', 'c_signal',
+            )
         }),
-        ('기술적 지표 (Supertrend/WaveTrend)', {
+        ('Supertrend / WaveTrend', {
+            'classes': ('collapse',),
             'fields': (
                 ('supertrend_direction', 'supertrend_value'),
                 ('wt1', 'wt2', 'wt_momentum'),
-                ('wt_cross_up', 'wt_cross_down', 'wt_oversold', 'wt_overbought')
+                ('wt_cross_up', 'wt_cross_down', 'wt_oversold', 'wt_overbought'),
             )
         }),
-        ('기타 보조지표', {
+        ('보조 지표', {
+            'classes': ('collapse',),
             'fields': (
                 ('rsi', 'mfi', 'adx'),
                 ('macd', 'macd_signal', 'macd_hist'),
                 ('sma5', 'sma20', 'sma120', 'deviation'),
-                ('is_squeeze', 'squeeze_released', 'obv_confirmed')
+                ('is_squeeze', 'squeeze_released', 'obv_confirmed'),
             )
         }),
     )

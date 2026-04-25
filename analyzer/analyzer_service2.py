@@ -248,8 +248,8 @@ class MarketAnalyzerService:
         
         if IS_CLOUD_RUN == False:
             markets = []
-            # markets.append('US')
-            markets.append('KR')
+            markets.append('US')
+            # markets.append('KR')
         return markets, now.date()
 
     @classmethod

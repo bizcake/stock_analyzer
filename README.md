@@ -30,7 +30,14 @@ gcloud builds list --limit=1
 gcloud builds log [빌드-ID]
 
 gcloud beta run services logs tail stocks --project stocks-490412
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=stocks" --project stocks-490412 --limit 10
+gcloud run services logs read stocks --limit 50 --project stocks-490412
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=stocks" --project stocks-490412 --limit 5
+
+gcloud logging read "resource.type=cloud_run_revision AND severity>=ERROR" \
+  --project stocks-490412 \
+  --limit 5 \
+  --format="value(textPayload, jsonPayload.message)"
+
 
 -- 앱(Cloud Run) 배포
 ./deploy_app.sh
