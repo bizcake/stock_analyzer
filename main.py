@@ -7,7 +7,7 @@ import django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'stocks.settings') 
 django.setup()
 
-from analyzer.analyzer_service import MarketAnalyzerService
+from analyzer.analyzer_service2 import MarketAnalyzerService
 
 def cloud_function_handler(event, context):
     MarketAnalyzerService.run_analysis()

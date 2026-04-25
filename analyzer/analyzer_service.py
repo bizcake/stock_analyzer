@@ -85,22 +85,38 @@ def analyze_batch_signals(tickers_list):
             s20 = df['SMA_20'].iloc[-1]
             s120 = df['Close'].rolling(120).mean().iloc[-1]
 
-            gain = (diff.where(diff > 0, 0)).rolling(14).mean()
-            loss = (-diff.where(diff < 0, 0)).rolling(14).mean()
-            rsi = 100 - (100 / (1 + (gain / loss.replace(0, np.nan)).iloc[-1]))
-
             hist_up = (macd - macd_sig).iloc[-1] > (macd - macd_sig).iloc[-2]
             macd_cross = macd.iloc[-1] > macd_sig.iloc[-1]
-            obv_confirmed = df['OBV'].iloc[-1] > df['OBV'].ewm(span=10).mean().iloc[-1]
 
             low_14, high_14 = df['Low'].rolling(14).min(), df['High'].rolling(14).max()
             stoch_k = (100 * (df['Close'] - low_14) / (high_14 - low_14)).rolling(3).mean()
             stoch_d = stoch_k.rolling(3).mean()
             stoch_cross = (stoch_k.iloc[-1] > stoch_d.iloc[-1]) and (stoch_k.iloc[-2] <= stoch_d.iloc[-2])
 
+            # RSI - Wilder's Smoothing으로 교체
+            gain = diff.where(diff > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+            loss = (-diff.where(diff < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+            rsi  = 100 - (100 / (1 + (gain / loss.replace(0, np.nan)).iloc[-1]))
+
+            # OBV - 단기+중기 동시 확인으로 강화
+            obv_ema10 = df['OBV'].ewm(span=10).mean()
+            obv_ema20 = df['OBV'].ewm(span=20).mean()
+            obv_confirmed = (
+                df['OBV'].iloc[-1] > obv_ema10.iloc[-1] and
+                df['OBV'].iloc[-1] > obv_ema20.iloc[-1]
+            )
+
+            # 호출부 s5_prev2 추가
+            s5_s    = df['Close'].rolling(5).mean()
+            s5      = s5_s.iloc[-1]
+            s5_prev  = s5_s.iloc[-2]
+            s5_prev2 = s5_s.iloc[-3]   # 추가
+
             final_text, final_code = get_final_signal_with_code(
                 rsi, hist_up, macd_cross, obv_confirmed, close_p,
-                s5, s5_prev, s20, s120, stoch_k.iloc[-1], stoch_d.iloc[-1], stoch_cross
+                s5, s5_prev, s5_prev2,   # 추가
+                s20, s120,
+                stoch_k.iloc[-1], stoch_d.iloc[-1], stoch_cross
             )
 
             results[ticker] = {

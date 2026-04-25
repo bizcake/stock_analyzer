@@ -229,3 +229,110 @@ class StockAnalysisLatestAdmin(admin.ModelAdmin):
             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
             stock.tv_url, stock.naver_url
         )
+    
+from django.contrib import admin
+from .models import StockAnalysisLatest2
+
+@admin.register(StockAnalysisLatest2)
+class StockAnalysisLatest2Admin(admin.ModelAdmin):
+    # 성능 최적화: StockMaster와 SignalCode2를 미리 JOIN
+    # 관련 모델 사전 로드 (성능 최적화)
+    list_select_related = ('stock', 'signal_code')
+
+    # 🚀 액션 드롭다운 및 좌측 체크박스 비활성화
+    actions = None
+
+    # 이미지와 동일한 컬럼 구성
+    list_display = (
+        'get_name_kr', 
+        'signal_display', 
+        'change_rate_display', 
+        'vol_ratio', 
+        'go_chart'
+    )
+
+    # 필터 및 검색 설정
+    list_filter = (
+        'signal_code', 
+        'stock__market', 
+        'is_squeeze', 
+        'wt_oversold', 
+        'wt_overbought'
+    )
+    search_fields = ('stock__ticker', 'stock__name_kr', 'signal')
+
+    # 매수 우선 정렬 (priority 값이 클수록 상단 노출) 및 분석일자 최신순
+    ordering = ('signal_code', '-analyzed_date')
+
+    # 5. 상세 페이지 그룹화 (필드가 많으므로 섹션 분리)
+    fieldsets = (
+        ('기본 정보', {
+            'fields': ('stock', 'analyzed_date', 'close_price', 'change_rate', 'volume', 'vol_ratio')
+        }),
+        ('분석 시그널', {
+            'fields': ('priority', 'signal_code', 'signal', 'action', 'p_code', 'p_name', 'up_days')
+        }),
+        ('기술적 지표 (Supertrend/WaveTrend)', {
+            'fields': (
+                ('supertrend_direction', 'supertrend_value'),
+                ('wt1', 'wt2', 'wt_momentum'),
+                ('wt_cross_up', 'wt_cross_down', 'wt_oversold', 'wt_overbought')
+            )
+        }),
+        ('기타 보조지표', {
+            'fields': (
+                ('rsi', 'mfi', 'adx'),
+                ('macd', 'macd_signal', 'macd_hist'),
+                ('sma5', 'sma20', 'sma120', 'deviation'),
+                ('is_squeeze', 'squeeze_released', 'obv_confirmed')
+            )
+        }),
+    )
+
+    @admin.display(description='종목명', ordering='stock__name_kr')
+    def get_name_kr(self, obj):
+        # 종목명을 이미지처럼 청록색 텍스트로 강조
+        return format_html(
+            '<span style="color: #00A88F; font-weight: bold;">{}</span>',
+            obj.stock.name_kr
+        )
+
+    @admin.display(description='시그널 코드명', ordering='signal')
+    def signal_display(self, obj):
+        # 시그널 텍스트에 따라 아이콘 분기 처리
+        signal_text = obj.signal if obj.signal else "대기중"
+        if "매수" in signal_text:
+            icon = ""
+        elif "매도" in signal_text:
+            icon = ""
+        else:
+            icon = ""
+        
+        return format_html('{} {}', icon, signal_text)
+
+    # 관계형 모델 필드 및 커스텀 표시 메서드
+    @admin.display(description='티커', ordering='stock__ticker')
+    def get_ticker(self, obj):
+        return obj.stock.ticker
+
+    @admin.display(description='등락률', ordering='change_rate')
+    def change_rate_display(self, obj):
+        if obj.change_rate is None: return "-"
+        color = "red" if obj.change_rate > 0 else "blue" if obj.change_rate < 0 else "black"
+        return admin.utils.format_html(
+            '<span style="color: {}; font-weight: bold;">{}%</span>',
+            color, obj.change_rate
+        )
+    
+    @admin.display(description='차트 링크')
+    def go_chart(self, obj):
+        # StockMasterAdmin이면 obj 자체가 stock이고, 
+        # StockAnalysisLatestAdmin이면 obj.stock을 참조해야 하므로 분기 처리
+        stock = obj if hasattr(obj, 'market') else obj.stock
+
+        # HTML 버튼 렌더링
+        return format_html(
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#2196F3; color:white; border-radius:4px; font-size:11px; text-decoration:none; margin-right:4px;"> T </a>'
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
+            stock.tv_url, stock.naver_url
+        )

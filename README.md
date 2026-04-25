@@ -9,6 +9,9 @@ python manage.py createsuperuser hans
 
 python manage.py shell
 
+from analyzer.sync_stock import sync_intraday_today
+sync_intraday_today(95)
+<!-- analyzer.sync_intraday_today() -->
 
 --구글 로그인
 gcloud auth login
@@ -33,7 +36,7 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 ./deploy_app.sh
 
 1) Pub/Sub 주제(Topic) 생성
-gcloud pubsub topics create trigger-stock-analysis
+gcloud pubsub topics create trigger-stock-analysis2
 
 2) Cloud Functions 배포
 ./deploy_function.sh
@@ -46,6 +49,10 @@ gcloud scheduler jobs create pubsub hourly-stock-analysis \
     --time-zone "Asia/Seoul" \
     --location asia-northeast3
 
+gcloud scheduler jobs update pubsub hourly-stock-analysis \
+    --schedule "*/30 * * * *" \
+    --location asia-northeast3
+    
 gcloud scheduler jobs list --location=asia-northeast3
 
 gcloud scheduler jobs run hourly-stock-analysis --location=asia-northeast3
