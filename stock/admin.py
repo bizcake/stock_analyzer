@@ -7,7 +7,7 @@ from django.utils.timezone import localtime
 from import_export import resources, fields
 from import_export.widgets import ForeignKeyWidget
 # from import_export.admin import ImportExportModelAdmin
-from .models import StockMaster, MyTrackedStock, SignalCode, StockAnalysisHistory, StockAnalysisLatest
+from .models import StockMaster, MyTrackedStock, SignalCode, StockAnalysisHistory, StockAnalysisLatest, StockDailyChart
 from .models import StockAnalysisLatest2
 
 
@@ -336,3 +336,60 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
             stock.tv_url, stock.naver_url
         )
+
+@admin.register(StockDailyChart)
+class StockDailyChartAdmin(admin.ModelAdmin):
+    # 1. 성능 최적화: StockMaster를 JOIN하여 가져옴
+    list_select_related = ('stock',)
+
+    # 2. 목록 뷰 구성: 일자, 종목명, 수정종가, 거래량, 차트 링크 순
+    list_display = (
+        'date', 
+        'get_ticker',
+        'get_name_kr', 
+        'adj_close', 
+        'get_volume',
+        'go_chart'
+    )
+
+    # 3. 검색 및 필터: 대량 데이터 처리를 위해 필수
+    search_fields = ('stock__ticker', 'stock__name_kr')
+    list_filter = ('stock__market', 'date')
+    
+    # 4. 정렬: 최신 날짜가 항상 위로
+    ordering = ('-date', 'stock__ticker')
+
+    # --- 커스텀 컬럼 정의 ---
+
+    @admin.display(description='티커', ordering='stock__ticker')
+    def get_ticker(self, obj):
+        return obj.stock.ticker
+
+    @admin.display(description='종목명', ordering='stock__name_kr')
+    def get_name_kr(self, obj):
+        return format_html(
+            '<span style="color: #00A88F; font-weight: bold;">{}</span>',
+            obj.stock.name_kr
+        )
+    
+    @admin.display(description='거래량', ordering='volume')
+    def get_volume(self, obj):
+        if obj.volume is None:
+            return "-"
+        # 1. f-string을 사용하는 방법 (가장 깔끔)
+        return f"{obj.volume:,}"
+
+    @admin.display(description='차트 링크')
+    def go_chart(self, obj):
+        # StockDailyChart에서 stock 객체 추출
+        stock = obj.stock
+        
+        # 이전 UI와 동일한 버튼 스타일 적용
+        return format_html(
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#2196F3; color:white; border-radius:4px; font-size:11px; text-decoration:none; margin-right:4px;"> T </a>'
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
+            stock.tv_url, stock.naver_url
+        )
+
+    # 상세 페이지 읽기 전용 설정 (차트 데이터는 보통 수동 수정을 막음)
+    readonly_fields = ('updated_at',) if hasattr(StockDailyChart, 'updated_at') else []

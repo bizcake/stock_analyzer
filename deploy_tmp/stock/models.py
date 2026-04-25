@@ -76,20 +76,81 @@ class StockMaster(models.Model):
 
     @property
     def naver_url(self):
-        """네이버 금융 차트 링크 반환"""
+        """네이버 금융 상세 페이지 링크 반환"""
         actual_exchange = self.exchange.upper() if self.exchange else ''
         
         if self.market == 'COIN':
             clean_ticker = self.ticker.replace("-USD", "").replace("KRW-", "")
-            return f"https://m.stock.naver.com/fchart/crypto/UPBIT/{clean_ticker}"
+            # 암호화폐 상세 페이지
+            return f"https://m.stock.naver.com/crypto/item/{clean_ticker}"
         elif self.market in ['KR', 'KOSPI', 'KOSDAQ']:
             code = self.ticker.split('.')[0]
-            return f"https://m.stock.naver.com/fchart/domestic/stock/{code}"
+            # 국내 주식 상세 페이지
+            return f"https://m.stock.naver.com/domestic/stock/{code}/total"
         else:
+            # 해외 주식 상세 페이지 (foreign -> worldstock)
             if actual_exchange == 'NASDAQ':
-                return f"https://m.stock.naver.com/fchart/foreign/stock/{self.ticker}.O"
+                return f"https://m.stock.naver.com/worldstock/stock/{self.ticker}.O/total"
             else:
-                return f"https://m.stock.naver.com/fchart/foreign/stock/{self.ticker}"
+                return f"https://m.stock.naver.com/worldstock/stock/{self.ticker}/total"
+    # @property
+    # def naver_url(self):
+    #     """네이버 금융 차트 링크 반환"""
+    #     actual_exchange = self.exchange.upper() if self.exchange else ''
+        
+    #     if self.market == 'COIN':
+    #         clean_ticker = self.ticker.replace("-USD", "").replace("KRW-", "")
+    #         return f"https://m.stock.naver.com/fchart/crypto/UPBIT/{clean_ticker}"
+    #     elif self.market in ['KR', 'KOSPI', 'KOSDAQ']:
+    #         code = self.ticker.split('.')[0]
+    #         return f"https://m.stock.naver.com/fchart/domestic/stock/{code}"
+    #     else:
+    #         if actual_exchange == 'NASDAQ':
+    #             return f"https://m.stock.naver.com/fchart/foreign/stock/{self.ticker}.O"
+    #         else:
+    #             return f"https://m.stock.naver.com/fchart/foreign/stock/{self.ticker}"
+
+class StockDailyChart(models.Model):
+    # StockMaster와의 외래키 관계 (종목 삭제 시 관련 차트 데이터도 삭제)
+    stock = models.ForeignKey(
+        'StockMaster', 
+        on_delete=models.CASCADE, 
+        related_name='daily_charts',
+        to_field='ticker'  # ticker를 기준으로 관계 형성
+    )
+    
+    date = models.DateField(verbose_name="거래 일자")
+    
+    # 가격 데이터 (소수점 4자리까지 허용하여 정밀도 확보)
+    open_price = models.DecimalField(max_digits=20, decimal_places=4, verbose_name="시가")
+    high_price = models.DecimalField(max_digits=20, decimal_places=4, verbose_name="고가")
+    low_price = models.DecimalField(max_digits=20, decimal_places=4, verbose_name="저가")
+    close_price = models.DecimalField(max_digits=20, decimal_places=4, verbose_name="종가")
+    
+    # 수정 종가 (배당, 분할 반영 - 분석 로직의 핵심 데이터)
+    adj_close = models.DecimalField(max_digits=20, decimal_places=4, verbose_name="수정 종가")
+    
+    # 거래량 (매우 클 수 있으므로 BigInteger 사용)
+    volume = models.BigIntegerField(verbose_name="거래량")
+
+    class Meta:
+        verbose_name = "일별 차트 데이터"
+        verbose_name_plural = "일별 차트 데이터 목록" 
+        
+        constraints = [
+            models.UniqueConstraint(
+                fields=['stock', 'date'],
+                name='unique_stock_date'
+            )
+        ]
+        
+        indexes = [
+            models.Index(fields=['stock', '-date']),
+            models.Index(fields=['-date']),
+        ]
+
+    def __str__(self):
+        return f"{self.stock.ticker} - {self.date}"
     
 # 2. 내가 대시보드에 등록한 관심 종목
 class MyTrackedStock(models.Model):
@@ -102,7 +163,7 @@ class MyTrackedStock(models.Model):
 # 3. 매일 분석된 결과 저장 (버튼 누를 때마다 수집 방지)
 class StockAnalysisLatest(models.Model):
     # OneToOneField: 종목당 무조건 1개의 레코드만 존재
-    stock = models.OneToOneField('StockMaster', on_delete=models.CASCADE, related_name='latest_analysis')
+    stock = models.OneToOneField('StockMaster', on_delete=models.CASCADE, related_name='latest_analysis2')
     
     t_signal = models.CharField(max_length=10, default='gray')
     n_signal = models.CharField(max_length=10, default='gray')
@@ -113,6 +174,83 @@ class StockAnalysisLatest(models.Model):
     signal_code = models.CharField(max_length=10, default='d01', verbose_name="공통 코드") 
 
     updated_at = models.DateTimeField(auto_now=True) # 업데이트 시간
+
+    def __str__(self):
+        return f"[최신] {self.stock.ticker}"
+
+class StockAnalysisLatest2(models.Model):
+    # OneToOneField: 종목당 무조건 1개의 레코드만 존재
+    stock = models.OneToOneField('StockMaster', on_delete=models.CASCADE, to_field='ticker' , related_name='latest_analysis')
+    
+    # 기준 정보
+    analyzed_date = models.DateField(null=True, blank=True, verbose_name="분석 기준일")
+    close_price   = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True, verbose_name="종가")
+    volume        = models.BigIntegerField(null=True, blank=True, verbose_name="거래량")
+    vol_ratio     = models.FloatField(null=True, blank=True, verbose_name="거래량 배수")
+    change_rate   = models.FloatField(null=True, blank=True, verbose_name="등락률(%)")
+
+    t_signal = models.CharField(max_length=10, default='gray')
+    n_signal = models.CharField(max_length=10, default='gray')
+    c_signal = models.CharField(max_length=10, default='gray')
+    p_code = models.CharField(max_length=10, default='p04', verbose_name="패턴 코드")
+    p_name = models.CharField(max_length=50, default='대기중')
+    up_days = models.IntegerField(default=0)
+
+    # 시그널
+    signal_code = models.ForeignKey(
+        'SignalCode2', on_delete=models.SET_DEFAULT,
+        default='d01', db_column='signal_code',
+        verbose_name="시그널 코드"
+    )
+
+    signal   = models.CharField(max_length=100, default='대기중', verbose_name="시그널 텍스트")
+    priority = models.IntegerField(default=0, verbose_name="우선순위")
+    action   = models.TextField(null=True, blank=True, verbose_name="행동 지침")
+
+    # Supertrend
+    supertrend_direction = models.IntegerField(null=True, blank=True, verbose_name="방향(1/-1)")
+    supertrend_value     = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
+
+    # WaveTrend
+    wt1           = models.FloatField(null=True, blank=True)
+    wt2           = models.FloatField(null=True, blank=True)
+    wt_cross_up   = models.BooleanField(default=False)
+    wt_cross_down = models.BooleanField(default=False)
+    wt_oversold   = models.BooleanField(default=False)
+    wt_overbought = models.BooleanField(default=False)
+    wt_momentum   = models.FloatField(null=True, blank=True)
+
+    # 응축
+    is_squeeze       = models.BooleanField(default=False)
+    squeeze_released = models.BooleanField(default=False)
+
+    # OBV
+    obv_confirmed = models.BooleanField(default=False)
+
+    # 보조지표
+    rsi         = models.FloatField(null=True, blank=True)
+    macd        = models.FloatField(null=True, blank=True)
+    macd_signal = models.FloatField(null=True, blank=True)
+    macd_hist   = models.FloatField(null=True, blank=True)
+    adx         = models.FloatField(null=True, blank=True)
+    mfi         = models.FloatField(null=True, blank=True)
+
+    # 이동평균
+    sma5      = models.FloatField(null=True, blank=True)
+    sma20     = models.FloatField(null=True, blank=True)
+    sma120    = models.FloatField(null=True, blank=True)
+    deviation = models.FloatField(null=True, blank=True, verbose_name="20일선 이격도(%)")
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "종목 최신 분석"
+        indexes = [
+            models.Index(fields=['priority', 'signal_code']),
+            models.Index(fields=['signal_code']),
+            models.Index(fields=['is_squeeze', 'squeeze_released']),
+            models.Index(fields=['updated_at']),
+        ]
 
     def __str__(self):
         return f"[최신] {self.stock.ticker}"
@@ -132,14 +270,26 @@ class StockAnalysisHistory(models.Model):
     signal_code = models.CharField(max_length=10, default='d01', verbose_name="공통 코드") 
 
     class Meta:
-        # 한 종목당 같은 날짜의 데이터는 1개만 존재하도록 강제 (중복 방지)
-        unique_together = ('stock', 'date')
+        constraints = [
+            models.UniqueConstraint(
+                fields=['stock', 'date'], 
+                name='unique_stock_analysis_history'
+            )
+        ]
         ordering = ['-date']
 
     def __str__(self):
         return f"[히스토리] {self.stock.ticker} ({self.date})"
     
 class SignalCode(models.Model):
+    code = models.CharField(max_length=10, primary_key=True, verbose_name="시그널 코드")
+    name = models.CharField(max_length=50, verbose_name="시그널 명칭")
+    description = models.CharField(max_length=200, verbose_name="의미 및 설명")
+
+    def __str__(self):
+        return f"[{self.code}] {self.name}"
+
+class SignalCode2(models.Model):
     code = models.CharField(max_length=10, primary_key=True, verbose_name="시그널 코드")
     name = models.CharField(max_length=50, verbose_name="시그널 명칭")
     description = models.CharField(max_length=200, verbose_name="의미 및 설명")

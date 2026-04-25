@@ -2,123 +2,290 @@
 import os
 import pytz
 from datetime import datetime, timedelta
-from stock.models import StockMaster, MyTrackedStock, StockAnalysisLatest, StockAnalysisHistory
+from itertools import groupby
+from operator import itemgetter
+# import yfinance as yf
+import pandas as pd
+import numpy as np
+# 종목별로 그룹핑
+from stock.models import StockMaster, MyTrackedStock, StockAnalysisLatest, StockAnalysisHistory, StockDailyChart
 from .signals import (
     get_final_signal_with_code, analyze_candle_pattern, 
 )
 from .indicators import (
     calc_hma, calc_wavetrend, calc_macd
 )
-import yfinance as yf
-import pandas as pd
-import numpy as np
+# 파일 상단에 추가
 
 # 1. 환경 분리: 구글 클라우드 환경인지 확인
 IS_CLOUD_RUN = os.environ.get('K_SERVICE') is not None
 
 def analyze_batch_signals(tickers_list):
-    """야후 데이터 일괄 다운로드 + 기술적 지표 분석 + 정밀 타점 시그널 반환"""
+    """DB 차트 데이터 → 기술적 지표 분석 → 시그널 반환"""
     if not tickers_list:
         return {}
 
     print(f"📊 분석 시작... 대상 종목 수: {len(tickers_list)}개")
-    name_map = dict(StockMaster.objects.filter(ticker__in=tickers_list).values_list('ticker', 'name_kr'))
-    
-    df_all = yf.download(tickers_list, period="1y", progress=False)
-    if df_all.empty:
-        return {}
+    name_map = dict(
+        StockMaster.objects.filter(ticker__in=tickers_list)
+        .values_list('ticker', 'name_kr')
+    )
 
+    # ✅ yf.download 대신 DB에서 전종목 한번에 로드
+    rows = (
+        StockDailyChart.objects
+        .filter(stock_id__in=tickers_list)
+        .order_by('stock_id', 'date')
+        .values('stock_id', 'date',
+                'open_price', 'high_price', 'low_price',
+                'close_price', 'adj_close', 'volume')
+    )
+
+    df_map = {}
+    all_rows = list(rows)
+    for ticker, group in groupby(all_rows, key=itemgetter('stock_id')):
+        df = pd.DataFrame(list(group))
+        for col in ['open_price','high_price','low_price','close_price','adj_close']:
+            df[col] = df[col].astype(float)
+        df['volume'] = df['volume'].astype(float)
+
+        # ✅ 기존 함수들이 High/Low/Close/Open/Volume 컬럼명 사용하므로 rename
+        df = df.rename(columns={
+            'open_price':  'Open',
+            'high_price':  'High',
+            'low_price':   'Low',
+            'close_price': 'Close',
+            'adj_close':   'Adj Close',
+            'volume':      'Volume',
+        })
+        df_map[ticker] = df.reset_index(drop=True)
+
+    # ✅ 이 아래는 기존 로직 그대로 — df 추출 부분만 교체
     results = {}
     for ticker in tickers_list:
         try:
-            df = df_all.copy()
-            if isinstance(df.columns, pd.MultiIndex):
-                if ticker in df.columns.get_level_values(0): df = df[ticker].copy()
-                elif ticker in df.columns.get_level_values(1): df = df.xs(ticker, axis=1, level=1).copy()
-                else: continue
-            
-            df.dropna(inplace=True)
-            if df.empty or len(df) < 120: continue
+            # ✅ 기존 MultiIndex 처리 대신 df_map에서 바로 가져옴
+            if ticker not in df_map:
+                continue
 
+            df = df_map[ticker].copy()
+            df.dropna(inplace=True)
+            if df.empty or len(df) < 120:
+                continue
+
+            # ── 이 아래는 기존 코드 완전 동일 ──────────
             close_p = float(df['Close'].iloc[-1])
 
-            # 연속 상승 일수
             diff = df['Close'].diff().dropna()
             up_days = 0
             for val in diff.iloc[::-1]:
                 if val > 0: up_days += 1
                 else: break
 
-            # T 신호등 (Hull MA & WaveTrend)
             df['HMA'] = calc_hma(df['Close'], 14)
             wt1, wt2 = calc_wavetrend(df)
             hma_up = df['HMA'].iloc[-1] > df['HMA'].iloc[-2]
-            wt_up = (wt1.iloc[-1] > wt2.iloc[-1]) and (wt1.iloc[-1] > wt1.iloc[-2])
+            wt_up  = (wt1.iloc[-1] > wt2.iloc[-1]) and (wt1.iloc[-1] > wt1.iloc[-2])
             t_signal = 'green' if hma_up and wt_up else ('red' if not hma_up and not wt_up else 'orange')
 
-            # N 신호등 (SMA20, MACD, OBV)
             df['SMA_20'] = df['Close'].rolling(20).mean()
             macd, macd_sig = calc_macd(df['Close'])
             df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
             df['OBV_SMA20'] = df['OBV'].rolling(20).mean()
-            
+
             price_up = close_p > df['SMA_20'].iloc[-1]
-            macd_up = macd.iloc[-1] > macd_sig.iloc[-1]
-            obv_up = (df['OBV_SMA20'].iloc[-1] > df['OBV_SMA20'].iloc[-5]) and (df['OBV'].iloc[-1] > df['OBV'].iloc[-20])
-            n_score = sum([price_up, macd_up, obv_up])
+            macd_up  = macd.iloc[-1] > macd_sig.iloc[-1]
+            obv_up   = (
+                df['OBV_SMA20'].iloc[-1] > df['OBV_SMA20'].iloc[-5] and
+                df['OBV'].iloc[-1] > df['OBV'].iloc[-20]
+            )
+            n_score  = sum([price_up, macd_up, obv_up])
             n_signal = 'green' if n_score == 3 else ('red' if n_score == 0 else 'orange')
 
-            # ATR (Average True Range) 14일 계산
-            tr1 = df['High'] - df['Low']
-            tr2 = (df['High'] - df['Close'].shift(1)).abs()
-            tr3 = (df['Low'] - df['Close'].shift(1)).abs()
+            tr1   = df['High'] - df['Low']
+            tr2   = (df['High'] - df['Close'].shift(1)).abs()
+            tr3   = (df['Low']  - df['Close'].shift(1)).abs()
             atr_14 = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(14).mean().iloc[-1]
 
-            # C 신호등 및 캔들 패턴
             c_signal, p_code, p_name = analyze_candle_pattern(
-                df['Open'].iloc[-1], df['High'].iloc[-1], df['Low'].iloc[-1], close_p, df['Close'].iloc[-2], atr_14
+                df['Open'].iloc[-1], df['High'].iloc[-1],
+                df['Low'].iloc[-1],  close_p,
+                df['Close'].iloc[-2], atr_14
             )
 
-            # 정밀 타점 (RSI, 스토캐스틱, 120일선)
-            s5_s = df['Close'].rolling(5).mean()
-            s5, s5_prev = s5_s.iloc[-1], s5_s.iloc[-2]
-            s20 = df['SMA_20'].iloc[-1]
-            s120 = df['Close'].rolling(120).mean().iloc[-1]
+            s5_s     = df['Close'].rolling(5).mean()
+            s5       = s5_s.iloc[-1]
+            s5_prev  = s5_s.iloc[-2]
+            s5_prev2 = s5_s.iloc[-3]
+            s20      = df['SMA_20'].iloc[-1]
+            s120     = df['Close'].rolling(120).mean().iloc[-1]
 
-            gain = (diff.where(diff > 0, 0)).rolling(14).mean()
-            loss = (-diff.where(diff < 0, 0)).rolling(14).mean()
-            rsi = 100 - (100 / (1 + (gain / loss.replace(0, np.nan)).iloc[-1]))
-
-            hist_up = (macd - macd_sig).iloc[-1] > (macd - macd_sig).iloc[-2]
+            hist_up    = (macd - macd_sig).iloc[-1] > (macd - macd_sig).iloc[-2]
             macd_cross = macd.iloc[-1] > macd_sig.iloc[-1]
-            obv_confirmed = df['OBV'].iloc[-1] > df['OBV'].ewm(span=10).mean().iloc[-1]
 
             low_14, high_14 = df['Low'].rolling(14).min(), df['High'].rolling(14).max()
             stoch_k = (100 * (df['Close'] - low_14) / (high_14 - low_14)).rolling(3).mean()
             stoch_d = stoch_k.rolling(3).mean()
-            stoch_cross = (stoch_k.iloc[-1] > stoch_d.iloc[-1]) and (stoch_k.iloc[-2] <= stoch_d.iloc[-2])
+            stoch_cross = (
+                stoch_k.iloc[-1] > stoch_d.iloc[-1] and
+                stoch_k.iloc[-2] <= stoch_d.iloc[-2]
+            )
+
+            gain = diff.where(diff > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+            loss = (-diff.where(diff < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+            rsi  = 100 - (100 / (1 + (gain / loss.replace(0, np.nan)).iloc[-1]))
+
+            obv_ema10 = df['OBV'].ewm(span=10).mean()
+            obv_ema20 = df['OBV'].ewm(span=20).mean()
+            obv_confirmed = (
+                df['OBV'].iloc[-1] > obv_ema10.iloc[-1] and
+                df['OBV'].iloc[-1] > obv_ema20.iloc[-1]
+            )
 
             final_text, final_code = get_final_signal_with_code(
                 rsi, hist_up, macd_cross, obv_confirmed, close_p,
-                s5, s5_prev, s20, s120, stoch_k.iloc[-1], stoch_d.iloc[-1], stoch_cross
+                s5, s5_prev, s5_prev2,
+                s20, s120,
+                stoch_k.iloc[-1], stoch_d.iloc[-1], stoch_cross
             )
 
             results[ticker] = {
-                'ticker': ticker,
-                'name_kr': name_map.get(ticker, ticker),
-                't_signal': t_signal,
-                'n_signal': n_signal,
-                'c_signal': c_signal,
-                'p_name': p_name,           
-                'p_code': p_code,           
-                'final_signal': final_text, 
-                'signal_code': final_code,  
-                'up_days': up_days
+                'ticker':       ticker,
+                'name_kr':      name_map.get(ticker, ticker),
+                't_signal':     t_signal,
+                'n_signal':     n_signal,
+                'c_signal':     c_signal,
+                'p_name':       p_name,
+                'p_code':       p_code,
+                'final_signal': final_text,
+                'signal_code':  final_code,
+                'up_days':      up_days,
             }
+
         except Exception as e:
             print(f"[{ticker}] 분석 중 에러: {e}")
-            
+
     return results
+
+# def analyze_batch_signals(tickers_list):
+#     """야후 데이터 일괄 다운로드 + 기술적 지표 분석 + 정밀 타점 시그널 반환"""
+#     if not tickers_list:
+#         return {}
+
+#     print(f"📊 분석 시작... 대상 종목 수: {len(tickers_list)}개")
+#     name_map = dict(StockMaster.objects.filter(ticker__in=tickers_list).values_list('ticker', 'name_kr'))
+    
+#     df_all = yf.download(tickers_list, period="1y", progress=False)
+#     if df_all.empty:
+#         return {}
+
+#     results = {}
+#     for ticker in tickers_list:
+#         try:
+#             df = df_all.copy()
+#             if isinstance(df.columns, pd.MultiIndex):
+#                 if ticker in df.columns.get_level_values(0): df = df[ticker].copy()
+#                 elif ticker in df.columns.get_level_values(1): df = df.xs(ticker, axis=1, level=1).copy()
+#                 else: continue
+            
+#             df.dropna(inplace=True)
+#             if df.empty or len(df) < 120: continue
+
+#             close_p = float(df['Close'].iloc[-1])
+
+#             # 연속 상승 일수
+#             diff = df['Close'].diff().dropna()
+#             up_days = 0
+#             for val in diff.iloc[::-1]:
+#                 if val > 0: up_days += 1
+#                 else: break
+
+#             # T 신호등 (Hull MA & WaveTrend)
+#             df['HMA'] = calc_hma(df['Close'], 14)
+#             wt1, wt2 = calc_wavetrend(df)
+#             hma_up = df['HMA'].iloc[-1] > df['HMA'].iloc[-2]
+#             wt_up = (wt1.iloc[-1] > wt2.iloc[-1]) and (wt1.iloc[-1] > wt1.iloc[-2])
+#             t_signal = 'green' if hma_up and wt_up else ('red' if not hma_up and not wt_up else 'orange')
+
+#             # N 신호등 (SMA20, MACD, OBV)
+#             df['SMA_20'] = df['Close'].rolling(20).mean()
+#             macd, macd_sig = calc_macd(df['Close'])
+#             df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
+#             df['OBV_SMA20'] = df['OBV'].rolling(20).mean()
+            
+#             price_up = close_p > df['SMA_20'].iloc[-1]
+#             macd_up = macd.iloc[-1] > macd_sig.iloc[-1]
+#             obv_up = (df['OBV_SMA20'].iloc[-1] > df['OBV_SMA20'].iloc[-5]) and (df['OBV'].iloc[-1] > df['OBV'].iloc[-20])
+#             n_score = sum([price_up, macd_up, obv_up])
+#             n_signal = 'green' if n_score == 3 else ('red' if n_score == 0 else 'orange')
+
+#             # ATR (Average True Range) 14일 계산
+#             tr1 = df['High'] - df['Low']
+#             tr2 = (df['High'] - df['Close'].shift(1)).abs()
+#             tr3 = (df['Low'] - df['Close'].shift(1)).abs()
+#             atr_14 = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1).rolling(14).mean().iloc[-1]
+
+#             # C 신호등 및 캔들 패턴
+#             c_signal, p_code, p_name = analyze_candle_pattern(
+#                 df['Open'].iloc[-1], df['High'].iloc[-1], df['Low'].iloc[-1], close_p, df['Close'].iloc[-2], atr_14
+#             )
+
+#             # 정밀 타점 (RSI, 스토캐스틱, 120일선)
+#             s5_s = df['Close'].rolling(5).mean()
+#             s5, s5_prev = s5_s.iloc[-1], s5_s.iloc[-2]
+#             s20 = df['SMA_20'].iloc[-1]
+#             s120 = df['Close'].rolling(120).mean().iloc[-1]
+
+#             hist_up = (macd - macd_sig).iloc[-1] > (macd - macd_sig).iloc[-2]
+#             macd_cross = macd.iloc[-1] > macd_sig.iloc[-1]
+
+#             low_14, high_14 = df['Low'].rolling(14).min(), df['High'].rolling(14).max()
+#             stoch_k = (100 * (df['Close'] - low_14) / (high_14 - low_14)).rolling(3).mean()
+#             stoch_d = stoch_k.rolling(3).mean()
+#             stoch_cross = (stoch_k.iloc[-1] > stoch_d.iloc[-1]) and (stoch_k.iloc[-2] <= stoch_d.iloc[-2])
+
+#             # RSI - Wilder's Smoothing으로 교체
+#             gain = diff.where(diff > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+#             loss = (-diff.where(diff < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+#             rsi  = 100 - (100 / (1 + (gain / loss.replace(0, np.nan)).iloc[-1]))
+
+#             # OBV - 단기+중기 동시 확인으로 강화
+#             obv_ema10 = df['OBV'].ewm(span=10).mean()
+#             obv_ema20 = df['OBV'].ewm(span=20).mean()
+#             obv_confirmed = (
+#                 df['OBV'].iloc[-1] > obv_ema10.iloc[-1] and
+#                 df['OBV'].iloc[-1] > obv_ema20.iloc[-1]
+#             )
+
+#             # 호출부 s5_prev2 추가
+#             s5_s    = df['Close'].rolling(5).mean()
+#             s5      = s5_s.iloc[-1]
+#             s5_prev  = s5_s.iloc[-2]
+#             s5_prev2 = s5_s.iloc[-3]   # 추가
+
+#             final_text, final_code = get_final_signal_with_code(
+#                 rsi, hist_up, macd_cross, obv_confirmed, close_p,
+#                 s5, s5_prev, s5_prev2,   # 추가
+#                 s20, s120,
+#                 stoch_k.iloc[-1], stoch_d.iloc[-1], stoch_cross
+#             )
+
+#             results[ticker] = {
+#                 'ticker': ticker,
+#                 'name_kr': name_map.get(ticker, ticker),
+#                 't_signal': t_signal,
+#                 'n_signal': n_signal,
+#                 'c_signal': c_signal,
+#                 'p_name': p_name,           
+#                 'p_code': p_code,           
+#                 'final_signal': final_text, 
+#                 'signal_code': final_code,  
+#                 'up_days': up_days
+#             }
+#         except Exception as e:
+#             print(f"[{ticker}] 분석 중 에러: {e}")
+            
+#     return results
 
 class MarketAnalyzerService:
     @staticmethod

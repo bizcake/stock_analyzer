@@ -1,52 +1,101 @@
 from .constants import SIGNAL_MAP
-def get_final_signal_with_code(rsi, hist_up, macd_cross, obv_confirmed, curr_p, s5, s5_prev, s20, s120, stoch_k, stoch_d, stoch_cross):
-    """지표를 받아 텍스트 신호와 공통 코드(a01 등)를 동시에 반환"""
-    final_signal = "Hold (관망)"
-    
-    s5_up = s5 > s5_prev
-    is_bull_market = (curr_p > s120) or (s20 > s120)
 
-    # 스토캐스틱 임계값 동적 적용 (상승장에서는 60 이하 골든크로스도 유효)
-    stoch_threshold = 60 if is_bull_market else 40
+def get_final_signal_with_code(
+    rsi, hist_up, macd_cross, obv_confirmed, curr_p,
+    s5, s5_prev, s5_prev2,   # s5_prev2 추가
+    s20, s120,
+    stoch_k, stoch_d, stoch_cross
+):
+    final_signal = "Hold (관망)"
+
+    # ✅ 수정1: 2봉 연속으로 추세 판단
+    s5_up          = s5 > s5_prev
+    s5_up_prev     = s5_prev > s5_prev2
+    s5_strongly_up = s5_up and s5_up_prev        # 2봉 연속 상승
+    s5_strongly_dn = not s5_up and not s5_up_prev # 2봉 연속 하락
+
+    # ✅ 수정2: 상승장 3단계 구분
+    strong_bull    = (curr_p > s120) and (s20 > s120)
+    weak_bull      = (curr_p > s120) or  (s20 > s120)
+    is_bull_market = weak_bull
+
+    # 스토캐스틱 임계값
+    stoch_threshold   = 60 if is_bull_market else 40
     stoch_buy_trigger = stoch_cross and (stoch_k < stoch_threshold)
 
-    # 이격도 (현재가와 20일선의 이격률) - 눌림목 판단용 (-3% ~ 7% 허용)
-    deviation = (curr_p - s20) / s20 if s20 != 0 else 0
-    is_pullback = -0.03 <= deviation <= 0.07
+    # 이격도
+    deviation   = (curr_p - s20) / s20 if s20 != 0 else 0
+    is_pullback = -0.05 <= deviation <= 0.07  # 하락 허용 범위 확대
 
-    # RSI 과매수 임계값 동적 적용 (상승장에서는 75까지 허용)
-    rsi_threshold = 75 if is_bull_market else 65
+    # RSI 임계값
+    rsi_threshold = 75 if strong_bull else (70 if weak_bull else 65)
 
+    # ✅ 수정3: MACD 신호 신뢰도 강화
+    # 크로스 직후 1봉만이 아닌 히스토그램 확대 동반 여부
+    macd_confirmed = macd_cross and hist_up  # 크로스 + 모멘텀 동반
+
+    # ─────────────────────────────────
+    # 메인 로직
+    # ─────────────────────────────────
     if s5 > s20:
         if s5_up:
             if hist_up and obv_confirmed:
-                if (macd_cross or stoch_buy_trigger) and rsi < rsi_threshold:
+                if (macd_confirmed or stoch_buy_trigger) and rsi < rsi_threshold:
                     if is_pullback:
-                        final_signal = "🔥 강력 매수 (완벽한 눌림목 타점)" if is_bull_market else "✅ 매수 (바닥탈출 시도)"
+                        final_signal = "🔥 강력 매수 (완벽한 눌림목 타점)" if strong_bull \
+                                  else "✅ 매수 (바닥탈출 시도)"
                     else:
-                        final_signal = "🔥 강력 매수 (추세 돌파/지속)" if is_bull_market else "✅ 매수 (상승 추세 강화)"
+                        final_signal = "🔥 강력 매수 (추세 돌파/지속)" if strong_bull \
+                                  else "✅ 매수 (상승 추세 강화)"
                 else:
-                    final_signal = "✅ 매수 (상승 추세 지속)" if is_bull_market else "↔️ 기술적 반등 (저항주의)"
+                    final_signal = "✅ 매수 (상승 추세 지속)" if is_bull_market \
+                              else "↔️ 기술적 반등 (저항주의)"
             else:
                 final_signal = "↔️ 방향 탐색 중"
-        else:
-            # [수정됨] 5일선이 꺾였더라도 주가가 5일선을 지지하거나 MACD 모멘텀이 살아있으면 횡보/눌림목으로 판정
-            # if curr_p >= s5 or hist_up:
-            if curr_p >= (s5 * 0.98) or hist_up:
-                final_signal = "↔️ 단기 눌림목 (추세 관찰)" if is_bull_market else "↔️ 상승 후 횡보 (방향 탐색 중)"
+
+        else:  # s5 꺾임
+            if s5_strongly_dn:
+                # 2봉 연속 하락일 때만 경고
+                final_signal = "⚠️ 관망 (단기 고점 의심)" if is_bull_market \
+                          else "⚠️ 매도 주의 (반등 끝자락)"
             else:
-                final_signal = "⚠️ 관망 (단기 고점 의심)" if is_bull_market else "⚠️ 매도 주의 (반등 끝자락)"
-    else:
+                # 1봉 노이즈 → 눌림목 판단
+                if curr_p >= (s5 * 0.98) or hist_up:
+                    final_signal = "↔️ 단기 눌림목 (추세 관찰)" if is_bull_market \
+                              else "↔️ 상승 후 횡보 (방향 탐색 중)"
+                else:
+                    final_signal = "⚠️ 관망 (단기 고점 의심)" if is_bull_market \
+                              else "⚠️ 매도 주의 (반등 끝자락)"
+
+    else:  # s5 < s20
         if s5_up:
-            # 찐바닥 포착 시 가장 중요한 obv_confirmed(수급) 조건 추가
-            if (macd_cross or stoch_buy_trigger) and hist_up and obv_confirmed and rsi < 40:
+            deep_discount   = deviation < -0.10
+            reversal_signal = macd_confirmed or stoch_buy_trigger
+
+            if deep_discount and reversal_signal and obv_confirmed:
+                # 많이 빠진 상태 + 반등 신호 + 수급
                 final_signal = "📉 찐바닥 포착 (매수 대기)"
+            elif reversal_signal and hist_up and obv_confirmed and rsi < 40:
+                # 기존 엄격 조건
+                final_signal = "📉 찐바닥 포착 (매수 대기)"
+            elif reversal_signal and hist_up:
+                # 수급 미확인이지만 나머지 충족
+                final_signal = "↔️ 기술적 반등 시도 (매수 검토)"
             else:
                 final_signal = "📉 기술적 반등 시도 (관망)"
-        else:
-            # RSI 과매도 구간 이탈이나 급격한 꺾임도 매도 트리거로 추가
-            if (curr_p < s5 and not is_bull_market) or (rsi > 75 and not hist_up):
-                final_signal = "📉 매도 (추세이탈)"
+
+        else:  # s5 하락
+            if s5_strongly_dn:
+                # ✅ 수정4: 하락 구간 매도 조건 현실화
+                # RSI > 75는 하락 중 거의 불가 → 제거
+                # 가격이 5일선 아래 + 약세장이면 매도
+                if curr_p < s5 and not is_bull_market:
+                    final_signal = "📉 매도 (추세이탈)"
+                elif not hist_up and not obv_confirmed:
+                    # 모멘텀 + 수급 모두 약화
+                    final_signal = "📉 매도 (추세이탈)"
+                else:
+                    final_signal = "📉 하락 추세 지속 (관망)"
             else:
                 final_signal = "📉 하락 추세 지속 (관망)"
 

@@ -7,16 +7,37 @@ import django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'stocks.settings') 
 django.setup()
 
-from analyzer.analyzer_service2 import MarketAnalyzerService
+from analyzer.analyzer_service2 import MarketAnalyzerService as ServiceV2
+from analyzer.analyzer_service import MarketAnalyzerService as ServiceV1
+
+# 3. [핵심] 실제 분석을 수행하는 내부 공통 함수
+def _execute_all_analyses():
+    print("🚀 전체 분석 시퀀스 시작")
+    
+    # V2 실행 (실패해도 V1에 영향을 주지 않음)
+    try:
+        print("➡️ 서비스 V2 실행 중...")
+        ServiceV2.run_analysis()
+    except Exception as e:
+        print(f"❌ 서비스 V2 에러 발생: {e}")
+
+    # V1 실행
+    try:
+        print("➡️ 서비스 V1 실행 중...")
+        ServiceV1.run_analysis()
+    except Exception as e:
+        print(f"❌ 서비스 V1 에러 발생: {e}")
+    
+    print("✅ 모든 분석 시퀀스 종료")
 
 def cloud_function_handler(event, context):
-    MarketAnalyzerService.run_analysis()
+    _execute_all_analyses()
     return "Success"
 
 # Cloud Functions의 Pub/Sub 트리거 기본 규격 (event, context)
 def run_stock_analysis(event, context):
     print("클라우드 펑션 실행됨")
-    MarketAnalyzerService.run_analysis()
+    _execute_all_analyses()
     return "Success"
 
 # --- 로컬 테스트용 코드 ---

@@ -7,7 +7,9 @@ from django.utils.timezone import localtime
 from import_export import resources, fields
 from import_export.widgets import ForeignKeyWidget
 # from import_export.admin import ImportExportModelAdmin
-from .models import StockMaster, MyTrackedStock, SignalCode, StockAnalysisHistory, StockAnalysisLatest
+from .models import StockMaster, MyTrackedStock, SignalCode, StockAnalysisHistory, StockAnalysisLatest, StockDailyChart
+from .models import StockAnalysisLatest2
+
 
 # --- 기존 StockMaster 설정 --- (유지)
 class StockMasterResource(resources.ModelResource):
@@ -208,11 +210,6 @@ class StockAnalysisLatestAdmin(admin.ModelAdmin):
     # 5. 자동 업데이트되는 시간은 읽기 전용으로 설정
     readonly_fields = ('updated_at',)
 
-    # 관계형 모델(StockMaster)의 데이터를 가져오기 위한 헬퍼 메서드
-    # @admin.display(ordering='stock__ticker', description='티커')
-    # def get_ticker(self, obj):
-    #     return obj.stock.ticker
-
     @admin.display(ordering='stock__name_kr', description='종목명')
     def get_name(self, obj):
         return obj.stock.name_kr
@@ -229,3 +226,170 @@ class StockAnalysisLatestAdmin(admin.ModelAdmin):
             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
             stock.tv_url, stock.naver_url
         )
+
+@admin.register(StockAnalysisLatest2)
+class StockAnalysisLatest2Admin(admin.ModelAdmin):
+    change_list_template = 'admin/change_list2.html'
+    # 성능 최적화: StockMaster와 SignalCode2를 미리 JOIN
+    # 관련 모델 사전 로드 (성능 최적화)
+    list_select_related = ('stock', 'signal_code')
+
+    # 🚀 액션 드롭다운 및 좌측 체크박스 비활성화
+    actions = None
+    list_filter_dropdown = True
+
+    # 3. 티커나 종목명으로 검색 가능 (관계형 검색)
+    show_full_result_count = False
+    list_per_page = 50
+
+    # 이미지와 동일한 컬럼 구성
+    list_display = (
+        'get_name_kr', 
+        'signal_display', 
+        'change_rate_display', 
+        'vol_ratio', 
+        'go_chart'
+    )
+
+    # 필터 및 검색 설정
+    list_filter = (
+        'signal_code', 
+        'stock__market', 
+        # 'is_squeeze', 
+        # 'wt_oversold', 
+        # 'wt_overbought'
+    )
+    search_fields = ('stock__ticker', 'stock__name_kr', 'signal')
+
+    # 매수 우선 정렬 (priority 값이 클수록 상단 노출) 및 분석일자 최신순
+    ordering = ('signal_code', '-analyzed_date')
+
+    # 5. 상세 페이지 그룹화 (필드가 많으므로 섹션 분리)
+    fieldsets = (
+        ('기본 정보', {
+            'fields': ('stock', 'analyzed_date', 'close_price', 'change_rate', 'volume', 'vol_ratio')
+        }),
+        ('분석 시그널', {
+            'fields': ('priority', 'signal_code', 'signal', 'action', 'p_code', 'p_name', 'up_days')
+        }),
+        ('기술적 지표 (Supertrend/WaveTrend)', {
+            'fields': (
+                ('supertrend_direction', 'supertrend_value'),
+                ('wt1', 'wt2', 'wt_momentum'),
+                ('wt_cross_up', 'wt_cross_down', 'wt_oversold', 'wt_overbought')
+            )
+        }),
+        ('기타 보조지표', {
+            'fields': (
+                ('rsi', 'mfi', 'adx'),
+                ('macd', 'macd_signal', 'macd_hist'),
+                ('sma5', 'sma20', 'sma120', 'deviation'),
+                ('is_squeeze', 'squeeze_released', 'obv_confirmed')
+            )
+        }),
+    )
+
+    @admin.display(description='종목명', ordering='stock__name_kr')
+    def get_name_kr(self, obj):
+        # 종목명을 이미지처럼 청록색 텍스트로 강조
+        return format_html(
+            '<span style="color: #00A88F; font-weight: bold;">{}</span>',
+            obj.stock.name_kr
+        )
+
+    @admin.display(description='시그널 코드명', ordering='signal')
+    def signal_display(self, obj):
+        # 시그널 텍스트에 따라 아이콘 분기 처리
+        signal_text = obj.signal if obj.signal else "대기중"
+        if "매수" in signal_text:
+            icon = ""
+        elif "매도" in signal_text:
+            icon = ""
+        else:
+            icon = ""
+        
+        return format_html('{} {}', icon, signal_text)
+
+    # 관계형 모델 필드 및 커스텀 표시 메서드
+    @admin.display(description='티커', ordering='stock__ticker')
+    def get_ticker(self, obj):
+        return obj.stock.ticker
+
+    @admin.display(description='등락률', ordering='change_rate')
+    def change_rate_display(self, obj):
+        if obj.change_rate is None: return "-"
+        color = "red" if obj.change_rate > 0 else "blue" if obj.change_rate < 0 else "black"
+        return admin.utils.format_html(
+            '<span style="color: {}; font-weight: bold;">{}%</span>',
+            color, obj.change_rate
+        )
+    
+    @admin.display(description='차트 링크')
+    def go_chart(self, obj):
+        # StockMasterAdmin이면 obj 자체가 stock이고, 
+        # StockAnalysisLatestAdmin이면 obj.stock을 참조해야 하므로 분기 처리
+        stock = obj if hasattr(obj, 'market') else obj.stock
+
+        # HTML 버튼 렌더링
+        return format_html(
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#2196F3; color:white; border-radius:4px; font-size:11px; text-decoration:none; margin-right:4px;"> T </a>'
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
+            stock.tv_url, stock.naver_url
+        )
+
+@admin.register(StockDailyChart)
+class StockDailyChartAdmin(admin.ModelAdmin):
+    # 1. 성능 최적화: StockMaster를 JOIN하여 가져옴
+    list_select_related = ('stock',)
+
+    # 2. 목록 뷰 구성: 일자, 종목명, 수정종가, 거래량, 차트 링크 순
+    list_display = (
+        'date', 
+        'get_ticker',
+        'get_name_kr', 
+        'adj_close', 
+        'get_volume',
+        'go_chart'
+    )
+
+    # 3. 검색 및 필터: 대량 데이터 처리를 위해 필수
+    search_fields = ('stock__ticker', 'stock__name_kr')
+    list_filter = ('stock__market', 'date')
+    
+    # 4. 정렬: 최신 날짜가 항상 위로
+    ordering = ('-date', 'stock__ticker')
+
+    # --- 커스텀 컬럼 정의 ---
+
+    @admin.display(description='티커', ordering='stock__ticker')
+    def get_ticker(self, obj):
+        return obj.stock.ticker
+
+    @admin.display(description='종목명', ordering='stock__name_kr')
+    def get_name_kr(self, obj):
+        return format_html(
+            '<span style="color: #00A88F; font-weight: bold;">{}</span>',
+            obj.stock.name_kr
+        )
+    
+    @admin.display(description='거래량', ordering='volume')
+    def get_volume(self, obj):
+        if obj.volume is None:
+            return "-"
+        # 1. f-string을 사용하는 방법 (가장 깔끔)
+        return f"{obj.volume:,}"
+
+    @admin.display(description='차트 링크')
+    def go_chart(self, obj):
+        # StockDailyChart에서 stock 객체 추출
+        stock = obj.stock
+        
+        # 이전 UI와 동일한 버튼 스타일 적용
+        return format_html(
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#2196F3; color:white; border-radius:4px; font-size:11px; text-decoration:none; margin-right:4px;"> T </a>'
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
+            stock.tv_url, stock.naver_url
+        )
+
+    # 상세 페이지 읽기 전용 설정 (차트 데이터는 보통 수동 수정을 막음)
+    readonly_fields = ('updated_at',) if hasattr(StockDailyChart, 'updated_at') else []

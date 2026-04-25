@@ -52,11 +52,10 @@ gcloud scheduler jobs create pubsub hourly-stock-analysis \
 gcloud scheduler jobs update pubsub hourly-stock-analysis \
     --schedule "*/30 * * * *" \
     --location asia-northeast3
-    
+
 gcloud scheduler jobs list --location=asia-northeast3
 
 gcloud scheduler jobs run hourly-stock-analysis --location=asia-northeast3
-
 
 echo "# stock_analyzer" >> README.md
 git init
