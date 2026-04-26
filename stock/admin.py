@@ -286,15 +286,21 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
             return [f.name for f in self.model._meta.fields]
         return ['updated_at']
 
-    fieldsets = (
-        ('분석 시그널', {
-            'fields': (
-                'stock',
-                'vol_ratio','priority', 'signal_code', 'signal',
-                'action', 'p_code', 'p_name', 'up_days',
-                't_signal', 'n_signal', 'c_signal', 'updated_at',
-            )
-        }),
+    fields = (
+            'stock',
+            'vol_ratio','priority', 'signal_code', 'signal',
+            'action', 'p_code', 'p_name', 'up_days',
+            't_signal', 'n_signal', 'c_signal', 'updated_at',
+        )
+    # fieldsets = (
+    #     ('', {
+    #         'fields': (
+    #             'stock',
+    #             'vol_ratio','priority', 'signal_code', 'signal',
+    #             'action', 'p_code', 'p_name', 'up_days',
+    #             't_signal', 'n_signal', 'c_signal', 'updated_at',
+    #         )
+    #     }),
         # ('Supertrend / WaveTrend', {
         #     'classes': ('collapse',),
         #     'fields': (
@@ -312,7 +318,7 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
         #         ('is_squeeze', 'squeeze_released', 'obv_confirmed'),
         #     )
         # }),
-    )
+    # )
 
     @admin.display(description='종목명', ordering='stock__name_kr')
     def get_name_kr(self, obj):
