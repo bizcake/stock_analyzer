@@ -1,6 +1,7 @@
 # function.gcloudignore
 # Cloud Functions 배포 시 제외할 파일 목록 (화면 및 웹 관련 소스 제외)
 
+.tmp_deploy
 .git
 .venv
 .gitignore

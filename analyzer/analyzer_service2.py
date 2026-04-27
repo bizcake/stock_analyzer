@@ -60,6 +60,7 @@ def _analyze_one(ticker: str, df: pd.DataFrame) -> dict | None:
         macd_hist          = macd - macd_sig
         rsi                = float(calc_rsi(close).iloc[-1])
         st_dir, st_val     = calc_supertrend(df)
+        st_dir_prev, _     = calc_supertrend(df.iloc[:-1])
         adx                = calc_adx(df)
         mfi                = calc_mfi(df)
         obv, obv_confirmed = calc_obv(df)
@@ -67,7 +68,8 @@ def _analyze_one(ticker: str, df: pd.DataFrame) -> dict | None:
         sq                 = calc_squeeze(df, wt1, wt2)
 
         # ── 시그널 ───────────────────────────────
-        sig = get_signal_priority(st_dir, wt1, wt2, obv_confirmed, sq)
+        # sig = get_signal_priority(st_dir, wt1, wt2, obv_confirmed, sq)
+        sig = get_signal_priority(st_dir, st_dir_prev, wt1, wt2, obv_confirmed, sq, df)
 
         # ── 신호등 ───────────────────────────────
         t_signal = calc_t_signal(df, wt1, wt2)
@@ -248,8 +250,8 @@ class MarketAnalyzerService:
         
         if IS_CLOUD_RUN == False:
             markets = []
-            markets.append('US')
-            # markets.append('KR')
+            # markets.append('US')
+            markets.append('KR')
         return markets, now.date()
 
     @classmethod

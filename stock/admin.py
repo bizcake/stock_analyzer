@@ -3,12 +3,9 @@ from django.db.models import Case, When, Value, IntegerField
 from django.utils.safestring import mark_safe
 from django.utils.html import format_html
 from django.utils.timezone import localtime
-
 from import_export import resources, fields
 from import_export.widgets import ForeignKeyWidget
-# from import_export.admin import ImportExportModelAdmin
-from .models import StockMaster, MyTrackedStock, SignalCode, SignalCode2, StockAnalysisHistory, StockAnalysisLatest, StockDailyChart
-from .models import StockAnalysisLatest2
+from .models import StockMaster, MyTrackedStock, SignalCode, CoinAnalysisLatest, StockAnalysisLatest, StockAnalysisLatest2
 
 
 # --- 기존 StockMaster 설정 --- (유지)
@@ -292,33 +289,6 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
             'action', 'p_code', 'p_name', 'up_days',
             't_signal', 'n_signal', 'c_signal', 'updated_at',
         )
-    # fieldsets = (
-    #     ('', {
-    #         'fields': (
-    #             'stock',
-    #             'vol_ratio','priority', 'signal_code', 'signal',
-    #             'action', 'p_code', 'p_name', 'up_days',
-    #             't_signal', 'n_signal', 'c_signal', 'updated_at',
-    #         )
-    #     }),
-        # ('Supertrend / WaveTrend', {
-        #     'classes': ('collapse',),
-        #     'fields': (
-        #         ('supertrend_direction', 'supertrend_value'),
-        #         ('wt1', 'wt2', 'wt_momentum'),
-        #         ('wt_cross_up', 'wt_cross_down', 'wt_oversold', 'wt_overbought'),
-        #     )
-        # }),
-        # ('보조 지표', {
-        #     'classes': ('collapse',),
-        #     'fields': (
-        #         ('rsi', 'mfi', 'adx'),
-        #         ('macd', 'macd_signal', 'macd_hist'),
-        #         ('sma5', 'sma20', 'sma120', 'deviation'),
-        #         ('is_squeeze', 'squeeze_released', 'obv_confirmed'),
-        #     )
-        # }),
-    # )
 
     @admin.display(description='종목명', ordering='stock__name_kr')
     def get_name_kr(self, obj):
@@ -350,7 +320,7 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
     def change_rate_display(self, obj):
         if obj.change_rate is None: return "-"
         color = "red" if obj.change_rate > 0 else "blue" if obj.change_rate < 0 else "black"
-        return admin.utils.format_html(
+        return format_html(
             '<span style="color: {}; font-weight: bold;">{}%</span>',
             color, obj.change_rate
         )
@@ -368,59 +338,124 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
             stock.tv_url, stock.naver_url
         )
 
-# @admin.register(StockDailyChart)
-# class StockDailyChartAdmin(admin.ModelAdmin):
-#     # 1. 성능 최적화: StockMaster를 JOIN하여 가져옴
-#     list_select_related = ('stock',)
+@admin.register(CoinAnalysisLatest)
+class CoinAnalysisLatestAdmin(admin.ModelAdmin):
+    change_list_template = 'admin/change_list2.html'
 
-#     # 2. 목록 뷰 구성: 일자, 종목명, 수정종가, 거래량, 차트 링크 순
-#     list_display = (
-#         'date', 
-#         'get_ticker',
-#         'get_name_kr', 
-#         'adj_close', 
-#         'get_volume',
-#         'go_chart'
-#     )
+    list_select_related = ('stock', 'signal_code')
 
-#     # 3. 검색 및 필터: 대량 데이터 처리를 위해 필수
-#     search_fields = ('stock__ticker', 'stock__name_kr')
-#     list_filter = ('stock__market', 'date')
+    actions = None
+    show_full_result_count = False
+    list_per_page = 50
+    list_filter_dropdown = True
+
+    # 코인 특성(1h/4h 및 보조지표)을 반영한 리스트 디스플레이
+    list_display = (
+        'get_name_kr',
+        'signal_display',
+        'change_rate_display',
+        'wt_status',
+        'go_chart',
+    )
+
+    list_filter = (
+        'interval',
+        'is_squeeze',
+    )
     
-#     # 4. 정렬: 최신 날짜가 항상 위로
-#     ordering = ('-date', 'stock__ticker')
+    search_fields = ('stock__ticker', 'stock__name_kr', 'signal')
+    # 종목별로 묶고 시간대(1h -> 4h) 순으로 정렬
+    ordering = ('stock__name_kr', 'interval')
 
-#     # --- 커스텀 컬럼 정의 ---
+    def get_queryset(self, request):
+        return (
+            super().get_queryset(request)
+            .select_related('stock', 'signal_code')
+        )
 
-#     @admin.display(description='티커', ordering='stock__ticker')
-#     def get_ticker(self, obj):
-#         return obj.stock.ticker
+    def get_readonly_fields(self, request, obj=None):
+        if obj:
+            return [f.name for f in self.model._meta.fields]
+        return ['updated_at']
 
-#     @admin.display(description='종목명', ordering='stock__name_kr')
-#     def get_name_kr(self, obj):
-#         return format_html(
-#             '<span style="color: #00A88F; font-weight: bold;">{}</span>',
-#             obj.stock.name_kr
-#         )
-    
-#     @admin.display(description='거래량', ordering='volume')
-#     def get_volume(self, obj):
-#         if obj.volume is None:
-#             return "-"
-#         # 1. f-string을 사용하는 방법 (가장 깔끔)
-#         return f"{obj.volume:,}"
+    # 상세 페이지 레이아웃
+    fields = (
+        ('stock', 'interval', 'analyzed_at'),
+        ('close_price', 'change_rate'),
+        ('volume', 'vol_ratio'),
+        ('priority', 'signal_code', 'signal'),
+        'action',
+        ('supertrend_direction', 'wt_momentum'),
+        ('is_squeeze', 'squeeze_released'),
+        ('rsi', 'macd', 'obv_confirmed'),
+        'updated_at'
+    )
 
-#     @admin.display(description='차트 링크')
-#     def go_chart(self, obj):
-#         # StockDailyChart에서 stock 객체 추출
-#         stock = obj.stock
+    @admin.display(description='종목명', ordering='stock__name_kr')
+    def get_name_kr(self, obj):
+        return format_html(
+            '<span style="color: #00A88F; font-weight: bold;">{}</span>',
+            obj.stock.name_kr
+        )
+
+    @admin.display(description='WT 상태')
+    def wt_status(self, obj):
+        tags = []
+        if obj.wt_oversold: tags.append('<span style="color:blue;">과매도</span>')
+        if obj.wt_overbought: tags.append('<span style="color:red;">과매수</span>')
+        if obj.wt_cross_up: tags.append('<span style="color:green;">↑크로스</span>')
+        if obj.is_squeeze: tags.append('<span style="color:orange;">응축중</span>')
+        if obj.squeeze_released: tags.append('<span style="color:purple; font-weight:bold;">🚀돌파</span>')
         
-#         # 이전 UI와 동일한 버튼 스타일 적용
-#         return format_html(
-#             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#2196F3; color:white; border-radius:4px; font-size:11px; text-decoration:none; margin-right:4px;"> T </a>'
-#             '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#00C73C; color:white; border-radius:4px; font-size:11px; text-decoration:none;"> N </a>',
-#             stock.tv_url, stock.naver_url
-#         )
+        # format_html 대신 mark_safe를 사용하여 문자열을 안전한 HTML로 렌더링
+        return mark_safe(' '.join(tags)) if tags else '-'
 
-#     # 상세 페이지 읽기 전용 설정 (차트 데이터는 보통 수동 수정을 막음)
-#     readonly_fields = ('updated_at',) if hasattr(StockDailyChart, 'updated_at') else []
+    @admin.display(description='단위', ordering='interval')
+    def interval_display(self, obj):
+        bg_color = '#E3F2FD' if obj.interval == '1h' else '#FFF3E0'
+        text_color = '#1565C0' if obj.interval == '1h' else '#E65100'
+        return format_html(
+            '<span style="background-color:{}; color:{}; padding:2px 6px; border-radius:4px; font-size:11px; font-weight:bold;">{}</span>',
+            bg_color, text_color, obj.get_interval_display()
+        )
+
+    @admin.display(description='시그널', ordering='signal')
+    def signal_display(self, obj):
+        signal_text = obj.signal if obj.signal else "대기중"
+        return signal_text
+
+    @admin.display(description='종가', ordering='close_price')
+    def close_price_display(self, obj):
+        # 코인 가격은 소수점 아래가 길 수 있으므로 소수점 4자리까지 표시
+        return f"{obj.close_price:.4f}"
+
+    @admin.display(description='등락률', ordering='change_rate')
+    def change_rate_display(self, obj):
+        if obj.change_rate is None: return "-"
+        color = "red" if obj.change_rate > 0 else "blue" if obj.change_rate < 0 else "black"
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}%</span>',
+            color, obj.change_rate
+        )
+
+    @admin.display(description='차트')
+    def go_chart(self, obj):
+        stock = obj.stock
+        # 코인 봉 단위에 맞춰 트레이딩뷰 파라미터 변환 (1h=60, 4h=240)
+        tv_interval = '60' if obj.interval == '1h' else '240'
+        
+        # tv_url에 interval 파라미터가 중복되지 않도록 처리
+        tv_base_url = stock.tv_url if stock.tv_url else "#"
+        if tv_base_url != "#" and "&interval=" not in tv_base_url:
+            tv_url = f"{tv_base_url}&interval={tv_interval}"
+        else:
+            tv_url = tv_base_url
+
+        naver_url = stock.naver_url if stock.naver_url else "#"
+
+        # T버튼에 봉단위(1h/4h)를 표기하여 직관성 확보
+        return format_html(
+            '<a href="{}" target="_blank" style="display:inline-block; padding:2px 6px; background:#2196F3; color:white; border-radius:4px; font-size:11px; text-decoration:none; margin-right:4px;"> T{} </a>'
+            ,
+            tv_url, obj.interval
+        )

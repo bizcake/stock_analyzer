@@ -301,3 +301,85 @@ class SignalCode2(models.Model):
 
     def __str__(self):
         return f"[{self.code}] {self.name}"
+
+class CoinAnalysisLatest(models.Model):
+    """코인 1h/4h 분석 결과"""
+    
+    INTERVAL_CHOICES = [
+        ('1h', '1시간봉'),
+        ('4h', '4시간봉'),
+    ]
+
+    stock = models.ForeignKey(
+        'StockMaster', 
+        on_delete=models.CASCADE,
+        to_field='ticker',
+        related_name='coin_analysis'
+    )
+    interval = models.CharField(
+        max_length=5, 
+        choices=INTERVAL_CHOICES,
+        verbose_name="봉 단위"
+    )
+
+    # ── 기준 정보 ──
+    analyzed_at = models.DateTimeField(verbose_name="분석 시각")
+    close_price = models.DecimalField(max_digits=30, decimal_places=8, verbose_name="종가")
+    volume = models.FloatField(verbose_name="거래량")
+    vol_ratio = models.FloatField(null=True, blank=True, verbose_name="거래량 비율")
+    change_rate = models.FloatField(null=True, blank=True, verbose_name="등락률")
+
+    # ── 시그널 ──
+    signal_code = models.ForeignKey(
+        'SignalCode2', 
+        on_delete=models.SET_DEFAULT,
+        default='d01', 
+        db_column='signal_code'
+    )
+    signal = models.CharField(max_length=100, default='대기중', verbose_name="시그널 명칭")
+    priority = models.IntegerField(default=0, verbose_name="우선순위")
+    action = models.TextField(null=True, blank=True, verbose_name="대응 전략")
+
+    # ── Supertrend / WaveTrend ──
+    supertrend_direction = models.IntegerField(null=True, blank=True, verbose_name="ST 방향")
+    wt1 = models.FloatField(null=True, blank=True)
+    wt2 = models.FloatField(null=True, blank=True)
+    wt_cross_up = models.BooleanField(default=False)
+    wt_cross_down = models.BooleanField(default=False)
+    wt_oversold = models.BooleanField(default=False)
+    wt_overbought = models.BooleanField(default=False)
+    wt_momentum = models.FloatField(null=True, blank=True)
+
+    # ── 응축 (Squeeze) ──
+    is_squeeze = models.BooleanField(default=False, verbose_name="응축 중")
+    squeeze_released = models.BooleanField(default=False, verbose_name="응축 돌파")
+
+    # ── 보조지표 ──
+    rsi = models.FloatField(null=True, blank=True)
+    macd = models.FloatField(null=True, blank=True)
+    macd_hist = models.FloatField(null=True, blank=True)
+    adx = models.FloatField(null=True, blank=True)
+    obv_confirmed = models.BooleanField(default=False, verbose_name="OBV 수급 확인")
+    
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'coin_analysis_latest'
+        verbose_name = '코인 분석 결과'
+        verbose_name_plural = '코인 분석 결과 목록'
+        
+        # 종목 + 봉 단위 조합 중복 데이터 방지 (UPSERT 기준)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['stock', 'interval'],
+                name='unique_coin_interval'
+            )
+        ]
+        # 조회 성능 최적화를 위한 인덱싱
+        indexes = [
+            models.Index(fields=['priority', 'signal_code']),
+            models.Index(fields=['stock', 'interval']),
+        ]
+
+    def __str__(self):
+        return f"{self.stock_id} [{self.interval}] {self.signal}"

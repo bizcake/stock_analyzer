@@ -17,5 +17,6 @@ media/
 db.sqlite3
 
 # 로그 파일 및 임시 파일
+.tmp_deploy/
 *.log
 *.json

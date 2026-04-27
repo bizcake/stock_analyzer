@@ -1,0 +1,5 @@
+# Gemini CLI ignore file
+.tmp_deploy/
+.venv/
+__pycache__/
+*.pyc

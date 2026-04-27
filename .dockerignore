@@ -1,3 +1,4 @@
+.tmp_deploy
 .venv
 venv
 __pycache__

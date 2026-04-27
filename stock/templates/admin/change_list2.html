@@ -181,6 +181,32 @@ document.addEventListener("DOMContentLoaded", function() {
         targetH3.appendChild(addButton);
     }
     document.getElementById('change-list-filters').classList.remove('pb-4')
+    
+    // 병합할 대상 기준이 되는 컬럼의 클래스 (메서드명 기반으로 자동 생성됨)
+    const targetColumnClass = '.field-get_name_kr'; 
+    
+    let previousCell = null;
+    let rowspanCount = 1;
+
+    const rows = document.querySelectorAll('#result_list tbody tr');
+    
+    rows.forEach(function(row) {
+        const currentCell = row.querySelector(targetColumnClass);
+        
+        if (currentCell) {
+            if (previousCell && previousCell.innerHTML === currentCell.innerHTML) {
+                // 이전 셀과 내용이 같으면 rowspan 증가시키고 현재 셀은 숨김
+                rowspanCount++;
+                previousCell.setAttribute('rowspan', rowspanCount);
+                previousCell.style.verticalAlign = 'middle'; // 중앙 정렬
+                currentCell.style.display = 'none';
+            } else {
+                // 다르면 기준 셀 갱신
+                previousCell = currentCell;
+                rowspanCount = 1;
+            }
+        }
+    });
 });
 </script>
 {% endblock %}
