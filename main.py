@@ -15,22 +15,22 @@ def _execute_all_analyses():
     print("🚀 전체 분석 시퀀스 시작")
     
     # V2 실행 (실패해도 V1에 영향을 주지 않음)
-    # try:
-    #     print("➡️ 서비스 V2 실행 중...")
-    #     ServiceV2.run_analysis()
-    # except Exception as e:
-    #     print(f"❌ 서비스 V2 에러 발생: {e}")
+    try:
+        print("➡️ 서비스 V2 실행 중...")
+        ServiceV2.run_analysis()
+    except Exception as e:
+        print(f"❌ 서비스 V2 에러 발생: {e}")
 
-    # # V1 실행
-    # try:
-    #     print("➡️ 서비스 V1 실행 중...")
-    #     ServiceV1.run_analysis()
-    # except Exception as e:
-    #     print(f"❌ 서비스 V1 에러 발생: {e}")
+    # V1 실행
+    try:
+        print("➡️ 서비스 V1 실행 중...")
+        ServiceV1.run_analysis()
+    except Exception as e:
+        print(f"❌ 서비스 V1 에러 발생: {e}")
     
     # coin 실행
     try:
-        print("➡️ 서비스 V1 실행 중...")
+        print("➡️ 서비스 coin 실행 중...")
         ServiceCoin.run_analysis()
     except Exception as e:
         print(f"❌ 서비스 V1 에러 발생: {e}")
