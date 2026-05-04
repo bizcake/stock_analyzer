@@ -212,9 +212,37 @@ def calc_candle_pattern(open_p, high_p, low_p, close_p, prev_close, atr=0):
         is_long = body > threshold
         return ('red', 'p09', f'장대음봉{gap_str}') if is_long \
           else ('orange', 'p05', f'단봉(음){gap_str}')
-
-def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df):
-    """우선순위 기반 시그널 판정 (추격 금지 및 BB 밴드폭 필터 적용)"""
+def _calc_market_state(df):
+    """시그널 판정에 필요한 등락률, 이격도, BB 밴드폭 상태를 사전 연산"""
+    close = df['Close']
+    close_p = float(close.iloc[-1])
+    prev_close = float(close.iloc[-2]) if len(close) > 1 else close_p
+    
+    # 1. 당일 등락률
+    change_rate = ((close_p - prev_close) / prev_close) * 100
+    
+    # 2. 20일선 및 이격도
+    sma20 = close.rolling(20).mean()
+    sma20_val = float(sma20.iloc[-1]) if not pd.isna(sma20.iloc[-1]) else close_p
+    deviation = ((close_p - sma20_val) / sma20_val) * 100 if sma20_val > 0 else 0
+    
+    # 3. BB 밴드폭 계산
+    bb_std = close.rolling(20).std()
+    bb_width_series = pd.Series(0.0, index=close.index)
+    valid_idx = sma20 > 0
+    bb_width_series[valid_idx] = ((sma20[valid_idx] + 2*bb_std[valid_idx]) - (sma20[valid_idx] - 2*bb_std[valid_idx])) / sma20[valid_idx]
+    
+    bb_mean = bb_width_series.rolling(20).mean().iloc[-1]
+    
+    return {
+        'change_rate': change_rate,
+        'deviation': deviation,
+        'bb_mean': bb_mean,
+        'bb_width_series': bb_width_series
+    }
+    
+def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df, market_type='KR'):
+    """우선순위 및 손익비(리스크) 기반 시그널 판정 (과열 추격 금지 및 타점 최적화)"""
     wt1_curr  = float(wt1.iloc[-1])
     wt2_curr  = float(wt2.iloc[-1])
     wt1_prev  = float(wt1.iloc[-2])
@@ -227,15 +255,30 @@ def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df):
     wt_overbought = wt1_curr > 60
     wt_rising     = wt1_curr > wt1_prev
 
-    sr  = sq['squeeze_released']
-    vs  = sq['vol_surge']
+    # sq 딕셔너리 안전한 값 추출
+    sr    = sq.get('squeeze_released', False)
+    vs    = sq.get('vol_surge', False)
+    is_sq = sq.get('is_squeeze', False)
 
-    # ✅ 1. 추가 로직: 상태 변수 계산 (BB 밴드폭 및 ST 전환)
+    # ✅ 1. 상태 변수 계산 (등락률, 이격도, BB 밴드폭) - df 내부 연산 유지
     close         = df['Close']
-    bb_mid        = close.rolling(20).mean()
-    bb_std        = close.rolling(20).std()
+    close_p       = float(close.iloc[-1])
+    prev_close    = float(close.iloc[-2]) if len(close) > 1 else close_p
+
+    # ➕ 거래량 배수 산출 (추가된 부분)
+    vol_curr      = float(df['Volume'].iloc[-1])
+    vol_ma20      = sq.get('vol_ma20', 0)
+    vol_ratio     = (vol_curr / vol_ma20) if vol_ma20 > 0 else 0
     
-    # 밴드폭 계산 (0 나누기 방지)
+    # 당일 등락률 및 이격도
+    change_rate   = ((close_p - prev_close) / prev_close) * 100
+    sma20         = close.rolling(20).mean()
+    sma20_val     = float(sma20.iloc[-1]) if not pd.isna(sma20.iloc[-1]) else close_p
+    deviation     = ((close_p - sma20_val) / sma20_val) * 100 if sma20_val > 0 else 0
+
+    # BB 밴드폭 계산 (0 나누기 방지)
+    bb_mid        = sma20
+    bb_std        = close.rolling(20).std()
     bb_width_series = pd.Series(0.0, index=close.index)
     valid_idx = bb_mid > 0
     bb_width_series[valid_idx] = ((bb_mid[valid_idx] + 2*bb_std[valid_idx]) - (bb_mid[valid_idx] - 2*bb_std[valid_idx])) / bb_mid[valid_idx]
@@ -244,40 +287,70 @@ def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df):
     
     st_just_turned_up = (trend == 1) and (trend_prev == -1)
     
-    # NaN 에러 방지 처리 (상장 직후 데이터 부족 종목)
+    # NaN 에러 방지 처리 및 5봉 기준 수축 검증 (신뢰도 상향)
     is_bb_valid = not pd.isna(bb_mean)
-    bb_was_narrow = (bb_width_series.iloc[-3:].min() < bb_mean * 0.7) if is_bb_valid else False
+    bb_was_narrow = (bb_width_series.iloc[-5:].min() < bb_mean * 0.7) if is_bb_valid else False
     bb_already_expanded = (bb_width_series.iloc[-1] > bb_mean * 1.3) if is_bb_valid else False
 
-    # ✅ 2. 최우선 판정: 신규 타점 및 추격 금지
-    
-    # ⚠️ [최상위 필터] 추격 금지: 이미 BB가 확장되었는데 ST가 뒤늦게 전환된 경우
-    if st_just_turned_up and bb_already_expanded:
-        s = ("⚠️ 추격 금지 (폭발 후 전환)", "b03", 4, "BB 이미 확대 완료. 눌림목 대기 후 재진입 권장")
-        
-    # 🥇 [최상]: BB 수축 + ST 방금 전환 + 거래량 급증 + WT 상승 + 수급 (완벽한 타점)
-    elif st_just_turned_up and bb_was_narrow and vs and wt_rising and obv_confirmed:
-        s = ("🚀 응축 폭발 (즉시 진입)", "a00", 1, "BB수축+ST전환+거래량급증+WT상승. 최적 타점")
-        
-    # 🥈 [상]: BB 수축 + ST 방금 전환
-    elif st_just_turned_up and bb_was_narrow:
-        s = ("🔥 응축 돌파 (ST 전환 확인)", "a01", 2, "BB수축+ST상향전환. 거래량 추가 확인 권장")
-        
-    # 🥉 [중]: BB 수축 상태에서 WT 상승 (ST 전환 대기)
-    elif bb_was_narrow and wt_rising and not sq['is_squeeze']:
-        s = ("↔️ 응축 해제 대기 (ST 전환 확인 후 진입)", "a03", 3, "BB수축+WT상승. ST전환 확인 후 진입")
+    # ✅ 2. 시장별 이격도 한계치 자동 설정
+    dev_limit_map = {'KR': 15, 'US': 20, 'COIN': 40}
+    dev_limit = dev_limit_map.get(market_type, 15)
 
-    # ✅ 3. 기존 판정 (추세 진행 및 과매수/과매도 로직 유지)
-    elif sr and wt_cross_up and trend == 1:
-        s = ("🚀 적극 매수 (응축 돌파 — 추세확인)", "a00", 1, "상승추세 중 응축 해제. 거래량 추가 확인 권장")
-    elif trend == 1 and wt_cross_up and wt_oversold and obv_confirmed:
-        s = ("🔥 강력 매수 (눌림목 — 최적 타점)", "a01", 2, "상승추세 중 과매도 반등. 핵심 매수 타점")
-    elif trend == 1 and wt_cross_up and wt_oversold_mid and obv_confirmed:
-        s = ("🔥 강력 매수 (중간 눌림목)", "a01", 2, "상승추세 중 중간 눌림목 반등")
-    elif trend == 1 and wt_cross_up and not wt_overbought:
-        s = ("✅ 매수 (추세 지속)", "a02", 3, "상승추세 중 WT 골든크로스. 안전 진입 구간")
-    elif trend == 1 and wt_rising and obv_confirmed and not wt_overbought:
-        s = ("✅ 매수 (추세 상승 유지)", "a02", 3, "추세+수급 모두 우호적. 보유 또는 추가 매수")
+    # ✅ 3. [위험 필터] 과열 vs 눌림목 정밀 분리
+    is_chasing  = (change_rate > 10) or bb_already_expanded or (deviation > dev_limit)
+    is_pullback = abs(deviation) < 10
+
+    # ➕ 거래량 가뭄 상태 판별 (평균 거래량의 50% 미만일 경우 속임수로 간주)
+    is_ghost_tick = vol_ratio < 0.5
+
+    # ✅ 4. 최우선 판정 로직 (리스크-리턴 기반)
+    
+    # ⚠️ [최상위 필터 1]: 거래량 부족 시 매수 시그널 차단 (신규 추가)
+    if (st_just_turned_up or sr or wt_cross_up) and is_ghost_tick:
+        s = ("↔️ 관망 (거래량 부족)", "c02", 0, f"거래량 배수({vol_ratio:.2f}) 미달. 가짜 신호 방지")
+
+    # ⚠️ [최상위 필터 2]: 추격 금지 (상승장 안전한 눌림목은 보호하고, 고점 추격만 차단)
+    elif (st_just_turned_up or sr or wt_cross_up) and is_chasing and not is_pullback:
+        s = ("⚠️ 추격 금지 (폭발 후 과열)", "b03", 4, "등락률/이격도 과열 또는 BB확장. 진입 보류")
+    
+    # 🥇 [1순위 S급]: 폭발 초입
+    elif st_just_turned_up and bb_was_narrow and vs and wt_rising and obv_confirmed and deviation < 10:
+        s = ("🚀 폭발 초입 (즉시 진입)", "a00", 1, "BB수축(5봉)+ST전환+거래량급증. 손익비 최상 타점")
+        
+    # 🥈 [2순위 A급]: 눌림목 반등
+    elif trend == 1 and wt_cross_up and obv_confirmed and deviation < 10:
+        if wt_oversold_mid:
+            s = ("🔥 눌림목 반등 (A급 — 과매도)", "a01", 2, "상승 추세 내 과매도권 20일선 지지 반등")
+        else:
+            s = ("🔥 눌림목 반등 (A급 타점)", "a01", 2, "상승 추세 내 20일선 부근 지지 후 반등")
+
+    # ⚠️ [최상위 필터]: 추격 금지 (상승장 안전한 눌림목은 보호하고, 고점 추격만 차단)
+    elif (st_just_turned_up or sr or wt_cross_up) and is_chasing and not is_pullback:
+        s = ("⚠️ 추격 금지 (폭발 후 과열)", "b03", 4, f"등락률/이격도 과열 또는 BB확장. 진입 보류")
+        
+    # 🥇 [1순위 S급]: 폭발 초입 (과열되지 않은 상태에서 거래량 동반 폭발)
+    elif st_just_turned_up and bb_was_narrow and vs and wt_rising and obv_confirmed and deviation < 10:
+        s = ("🚀 폭발 초입 (즉시 진입)", "a00", 1, "BB수축(5봉)+ST전환+거래량급증. 손익비 최상 타점")
+        
+    # 🥈 [2순위 A급]: 눌림목 반등 (wt_oversold_mid 조건 분리하여 유연하게 적용)
+    elif trend == 1 and wt_cross_up and obv_confirmed and deviation < 10:
+        if wt_oversold_mid:
+            s = ("🔥 눌림목 반등 (A급 — 과매도)", "a01", 2, "상승 추세 내 과매도권 20일선 지지 반등")
+        else:
+            s = ("🔥 눌림목 반등 (A급 타점)", "a01", 2, "상승 추세 내 20일선 부근 지지 후 반등")
+            
+    # 🥉 [3순위 B급]: 추세 지속 (시장별 이격도 한계치 적용)
+    elif trend == 1 and wt_cross_up and not wt_overbought and deviation < dev_limit:
+        s = ("✅ 매수 (추세 지속)", "a02", 3, f"이격도 {dev_limit}% 미만 안전 진입 구간")
+
+    # 🔄 [대기]: 응축 상태 분기 처리 (is_squeeze 여부에 따라 정확히 구분)
+    elif bb_was_narrow and wt_rising:
+        if is_sq:
+            s = ("↔️ 응축 중 (ST 전환 대기)", "a03", 3, "수축 진행 중. 방향 확정 대기")
+        else:
+            s = ("↔️ 응축 해제 대기 (ST 전환 전)", "a03", 3, "수축 해제됨. ST 전환 확인 후 진입")
+
+    # ✅ 5. 기타 매도 및 하락 관리 로직
     elif trend == 1 and wt_overbought and wt_cross_down:
         s = ("⚠️ 고점 주의 (신규 진입 금지)", "b03", 4, "과매수 구간 WT 꺾임. 기존 보유자 익절 고려")
     elif trend == 1 and wt_overbought:
@@ -304,6 +377,97 @@ def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df):
         'wt1':           round(wt1_curr, 4),
         'wt2':           round(wt2_curr, 4),
     }
+
+#     """우선순위 기반 시그널 판정 (추격 금지 및 BB 밴드폭 필터 적용)"""
+#     wt1_curr  = float(wt1.iloc[-1])
+#     wt2_curr  = float(wt2.iloc[-1])
+#     wt1_prev  = float(wt1.iloc[-2])
+#     wt2_prev  = float(wt2.iloc[-2])
+
+#     wt_cross_up   = (wt1_curr > wt2_curr) and (wt1_prev <= wt2_prev)
+#     wt_cross_down = (wt1_curr < wt2_curr) and (wt1_prev >= wt2_prev)
+#     wt_oversold   = wt1_curr < -60
+#     wt_oversold_mid = wt1_curr < -40
+#     wt_overbought = wt1_curr > 60
+#     wt_rising     = wt1_curr > wt1_prev
+
+#     sr  = sq['squeeze_released']
+#     vs  = sq['vol_surge']
+
+#     # ✅ 1. 추가 로직: 상태 변수 계산 (BB 밴드폭 및 ST 전환)
+#     close         = df['Close']
+#     bb_mid        = close.rolling(20).mean()
+#     bb_std        = close.rolling(20).std()
+    
+#     # 밴드폭 계산 (0 나누기 방지)
+#     bb_width_series = pd.Series(0.0, index=close.index)
+#     valid_idx = bb_mid > 0
+#     bb_width_series[valid_idx] = ((bb_mid[valid_idx] + 2*bb_std[valid_idx]) - (bb_mid[valid_idx] - 2*bb_std[valid_idx])) / bb_mid[valid_idx]
+    
+#     bb_mean       = bb_width_series.rolling(20).mean().iloc[-1]
+    
+#     st_just_turned_up = (trend == 1) and (trend_prev == -1)
+    
+#     # NaN 에러 방지 처리 (상장 직후 데이터 부족 종목)
+#     is_bb_valid = not pd.isna(bb_mean)
+#     bb_was_narrow = (bb_width_series.iloc[-3:].min() < bb_mean * 0.7) if is_bb_valid else False
+#     bb_already_expanded = (bb_width_series.iloc[-1] > bb_mean * 1.3) if is_bb_valid else False
+
+#     # ✅ 2. 최우선 판정: 신규 타점 및 추격 금지
+    
+#     # ⚠️ [최상위 필터] 추격 금지: 이미 BB가 확장되었는데 ST가 뒤늦게 전환된 경우
+#     if st_just_turned_up and bb_already_expanded:
+#         s = ("⚠️ 추격 금지 (폭발 후 전환)", "b03", 4, "BB 이미 확대 완료. 눌림목 대기 후 재진입 권장")
+        
+#     # 🥇 [최상]: BB 수축 + ST 방금 전환 + 거래량 급증 + WT 상승 + 수급 (완벽한 타점)
+#     elif st_just_turned_up and bb_was_narrow and vs and wt_rising and obv_confirmed:
+#         s = ("🚀 응축 폭발 (즉시 진입)", "a00", 1, "BB수축+ST전환+거래량급증+WT상승. 최적 타점")
+        
+#     # 🥈 [상]: BB 수축 + ST 방금 전환
+#     elif st_just_turned_up and bb_was_narrow:
+#         s = ("🔥 응축 돌파 (ST 전환 확인)", "a01", 2, "BB수축+ST상향전환. 거래량 추가 확인 권장")
+        
+#     # 🥉 [중]: BB 수축 상태에서 WT 상승 (ST 전환 대기)
+#     elif bb_was_narrow and wt_rising and not sq['is_squeeze']:
+#         s = ("↔️ 응축 해제 대기 (ST 전환 확인 후 진입)", "a03", 3, "BB수축+WT상승. ST전환 확인 후 진입")
+
+#     # ✅ 3. 기존 판정 (추세 진행 및 과매수/과매도 로직 유지)
+#     elif sr and wt_cross_up and trend == 1:
+#         s = ("🚀 적극 매수 (응축 돌파 — 추세확인)", "a00", 1, "상승추세 중 응축 해제. 거래량 추가 확인 권장")
+#     elif trend == 1 and wt_cross_up and wt_oversold and obv_confirmed:
+#         s = ("🔥 강력 매수 (눌림목 — 최적 타점)", "a01", 2, "상승추세 중 과매도 반등. 핵심 매수 타점")
+#     elif trend == 1 and wt_cross_up and wt_oversold_mid and obv_confirmed:
+#         s = ("🔥 강력 매수 (중간 눌림목)", "a01", 2, "상승추세 중 중간 눌림목 반등")
+#     elif trend == 1 and wt_cross_up and not wt_overbought:
+#         s = ("✅ 매수 (추세 지속)", "a02", 3, "상승추세 중 WT 골든크로스. 안전 진입 구간")
+#     elif trend == 1 and wt_rising and obv_confirmed and not wt_overbought:
+#         s = ("✅ 매수 (추세 상승 유지)", "a02", 3, "추세+수급 모두 우호적. 보유 또는 추가 매수")
+#     elif trend == 1 and wt_overbought and wt_cross_down:
+#         s = ("⚠️ 고점 주의 (신규 진입 금지)", "b03", 4, "과매수 구간 WT 꺾임. 기존 보유자 익절 고려")
+#     elif trend == 1 and wt_overbought:
+#         s = ("⚠️ 과매수 (보유 유지, 신규 금지)", "b03", 4, "과매수 구간. 신규 진입 자제")
+#     elif trend == -1 and wt_cross_up and wt_oversold and obv_confirmed:
+#         s = ("📉 찐바닥 포착 (단기 반등)", "a04", 5, "하락추세 중 극단 과매도 반등. 단기 매매만")
+#     elif trend == -1 and wt_cross_down:
+#         s = ("📉 매도 (하락 가속)", "b01", 5, "하락추세 + WT 데드크로스. 보유 청산 고려")
+#     elif trend == -1 and not wt_rising:
+#         s = ("📉 하락 추세 지속", "c04", 5, "하락추세 유지 중. 진입 금지")
+#     else:
+#         s = ("↔️ 방향 탐색 중", "c02", 0, "추세 불명확. 대기")
+
+#     return {
+#         'signal':        s[0],
+#         'signal_code':   s[1],
+#         'priority':      s[2],
+#         'action':        s[3],
+#         'wt_cross_up':   wt_cross_up,
+#         'wt_cross_down': wt_cross_down,
+#         'wt_oversold':   wt_oversold,
+#         'wt_overbought': wt_overbought,
+#         'wt_momentum':   round(wt1_curr - wt1_prev, 4),
+#         'wt1':           round(wt1_curr, 4),
+#         'wt2':           round(wt2_curr, 4),
+#     }
 
 def calc_t_signal(df, wt1, wt2):
     """T 신호등 (HMA + WaveTrend)"""

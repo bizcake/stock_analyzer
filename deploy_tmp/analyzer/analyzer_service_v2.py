@@ -6,7 +6,7 @@ from django.db import transaction
 import pytz
 from datetime import datetime, timedelta
 from stock.models import StockMaster, StockDailyChart, StockAnalysisLatest2
-from .sync_stock import sync_intraday_today
+from .sync_stock import sync_intraday_today, sync_initial_full
 from .indicators import (
     calc_wavetrend, calc_macd, calc_rsi, calc_supertrend,
     calc_adx, calc_mfi, calc_obv, calc_atr, calc_squeeze,
@@ -48,7 +48,7 @@ def _load_df(ticker: str) -> pd.DataFrame | None:
     return df.reset_index(drop=True)
 
 
-def _analyze_one(ticker: str, df: pd.DataFrame) -> dict | None:
+def _analyze_one(ticker: str, df: pd.DataFrame, market_type: str) -> dict | None:
     """종목 하나 분석 → 저장용 dict 반환"""
     try:
         close   = df['Close']
@@ -69,7 +69,7 @@ def _analyze_one(ticker: str, df: pd.DataFrame) -> dict | None:
 
         # ── 시그널 ───────────────────────────────
         # sig = get_signal_priority(st_dir, wt1, wt2, obv_confirmed, sq)
-        sig = get_signal_priority(st_dir, st_dir_prev, wt1, wt2, obv_confirmed, sq, df)
+        sig = get_signal_priority(st_dir, st_dir_prev, wt1, wt2, obv_confirmed, sq, df, market_type=market_type)
 
         # ── 신호등 ───────────────────────────────
         t_signal = calc_t_signal(df, wt1, wt2)
@@ -161,7 +161,7 @@ def analyze_batch_signals(tickers=None, chunk_size=500):
     qs = StockMaster.objects.all()
     if tickers:
         qs = qs.filter(ticker__in=tickers)
-    ticker_list = list(qs.values_list('ticker', flat=True))
+    ticker_list = list(qs.values_list('ticker', 'market'))
     total       = len(ticker_list)
     print(f"대상 종목: {total}개")
 
@@ -181,7 +181,7 @@ def analyze_batch_signals(tickers=None, chunk_size=500):
         'updated_at',
     ]
 
-    for idx, ticker in enumerate(ticker_list, 1):
+    for idx, (ticker, market_type) in enumerate(ticker_list, 1):
         try:
             df = _load_df(ticker)
 
@@ -191,7 +191,7 @@ def analyze_batch_signals(tickers=None, chunk_size=500):
                 skip += 1
                 continue
 
-            data = _analyze_one(ticker, df)
+            data = _analyze_one(ticker, df, market_type)
             if data is None:
                 fail += 1
                 continue
@@ -250,8 +250,8 @@ class MarketAnalyzerService:
         
         if IS_CLOUD_RUN == False:
             markets = []
-            # markets.append('US')
-            markets.append('KR')
+            markets.append('US')
+            # markets.append('KR')
         return markets, now.date()
 
     @classmethod
@@ -260,7 +260,10 @@ class MarketAnalyzerService:
         target_markets, today_date = cls.get_target_markets()
 
         # 데이터 수집
-        sync_intraday_today(batch_size=160, batch_delay=3.0, target_markets=target_markets)
+        if IS_CLOUD_RUN:
+            sync_intraday_today(batch_size=160, batch_delay=3.0, target_markets=target_markets)
+        else:
+            sync_initial_full()
 
         index_list = set(StockMaster.objects.filter(
             market__in=target_markets,

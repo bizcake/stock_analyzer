@@ -98,7 +98,7 @@ def _fetch_and_save_batch(ticker_list, mode='incremental', batch_index=''):
         if mode == 'full':
             params = {"period": "3y"}
         elif mode == 'today':
-            params = {"period": "7d"} # 여유있게 가져와서 당일 필터링
+            params = {"period": "3d"} # 여유있게 가져와서 당일 필터링
         else: # incremental
             # 증분은 종목별 마지막 날짜가 다를 수 있으므로 
             # 배치 내 가장 오래된 '마지막 날짜' 기준으로 조회하거나 넉넉히 1개월치 조회
