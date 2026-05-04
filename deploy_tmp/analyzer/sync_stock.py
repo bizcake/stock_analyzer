@@ -1,8 +1,7 @@
 import time
 import requests
 import yfinance as yf
-from django.utils import timezone
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from django.db.models import Max, Min
 from django.db import transaction
@@ -17,11 +16,11 @@ def sync_initial_full(batch_size=50, batch_delay=1.0):
     최초 1회 실행 - 데이터 없는 종목만 3년치 수집
     batch_size: 한 번에 처리할 종목 수
     """
-    print("🚀 최초 전체 수집 시작...")
-    # 이미 데이터 있는 종목 제외
+    # 기존 로직 이미 데이터 있는 종목 제외
     # existing_tickers = set(
     #     StockDailyChart.objects.values_list('stock_id', flat=True).distinct()
     # )
+
     # 1. 기준일 계산: 오늘로부터 100일 전 날짜
     # (DateField를 사용 중이라면 .date()를 붙여주고, DateTimeField라면 그대로 사용하세요)
     threshold_date = timezone.now().date() - timedelta(days=100)
@@ -34,7 +33,7 @@ def sync_initial_full(batch_size=50, batch_delay=1.0):
 
     # 100일 치 이상을 보유한 기업들의 집합
     existing_tickers = set(sufficient_data_qs.values_list('stock_id', flat=True))
-    
+
     all_tickers = list(StockMaster.objects
                        .filter(index_type__isnull=False)
                        .values_list('ticker', flat=True))
