@@ -273,11 +273,15 @@ class StockAnalysisLatest2Admin(admin.ModelAdmin):
     ordering      = ('signal_code', '-analyzed_date')
 
     def get_queryset(self, request):
-        return (
-            super().get_queryset(request)
-            .select_related('stock', 'signal_code')
-        )
-
+        # 1. 부모 클래스의 기본 쿼리셋을 가져옵니다.
+        qs = super().get_queryset(request)
+        
+        # 2. StockAnalysisLatest2 모델에 연결된 StockMaster 관계 필드명에 따라 필터링합니다.
+        # 주의: 'stock' 부분은 StockAnalysisLatest2 모델에서 
+        # StockMaster를 참조하는 실제 외래키 필드명으로 변경하셔야 합니다.
+        # 예: 필드명이 'stock_master'라면 -> qs.filter(stock_master__index_type__isnull=False)
+        return qs.filter(stock__index_type__isnull=False)
+    
     def get_readonly_fields(self, request, obj=None):
         if obj:
             return [f.name for f in self.model._meta.fields]

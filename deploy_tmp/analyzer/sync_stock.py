@@ -41,6 +41,7 @@ def sync_initial_full(batch_size=50, batch_delay=1.0):
     new_tickers  = [t for t in all_tickers if t not in existing_tickers]
 
     print(f"신규 수집 대상: {len(new_tickers)}개")
+    print(new_tickers)
 
     session = _make_session()
 

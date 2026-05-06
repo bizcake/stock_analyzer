@@ -29,11 +29,11 @@ def _execute_all_analyses():
     #     print(f"❌ 서비스 V1 에러 발생: {e}")
     
     # coin 실행
-    # try:
-    #     print("➡️ 서비스 coin 실행 중...")
-    #     ServiceCoin.run_analysis()
-    # except Exception as e:
-    #     print(f"❌ 서비스 V1 에러 발생: {e}")
+    try:
+        print("➡️ 서비스 coin 실행 중...")
+        ServiceCoin.run_analysis()
+    except Exception as e:
+        print(f"❌ 서비스 V1 에러 발생: {e}")
     
     print("✅ 모든 분석 시퀀스 종료")
 

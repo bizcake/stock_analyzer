@@ -59,8 +59,7 @@ def _analyze_one(ticker: str, df: pd.DataFrame, market_type: str) -> dict | None
         macd, macd_sig     = calc_macd(close)
         macd_hist          = macd - macd_sig
         rsi                = float(calc_rsi(close).iloc[-1])
-        st_dir, st_val     = calc_supertrend(df)
-        st_dir_prev, _     = calc_supertrend(df.iloc[:-1])
+        st_dir, st_dir_prev, st_val     = calc_supertrend(df)
         adx                = calc_adx(df)
         mfi                = calc_mfi(df)
         obv, obv_confirmed = calc_obv(df)
@@ -250,8 +249,8 @@ class MarketAnalyzerService:
         
         if IS_CLOUD_RUN == False:
             markets = []
-            markets.append('US')
-            # markets.append('KR')
+            # markets.append('US')
+            markets.append('KR')
         return markets, now.date()
 
     @classmethod
