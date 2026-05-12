@@ -260,151 +260,253 @@ def _calc_market_state(df):
         'bb_width_series': bb_width_series
     }
 
-def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df, market_type='KR'):
-    """우선순위 및 손익비(리스크) 기반 시그널 판정 (응축 돌파 선취매 로직 포함)"""
+def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df, market_type='KR', index_trend=1):
+    """
+    초심(Back to Basics) 정석 추세 추종 로직
+    [매수] 20/60 정배열 + 20 우상향 + OBV 상승 + MACD 골크
+    [매도] ST 하락 전환 또는 20일선 이탈
+    """
     
-    # ── 1. 지표 상태 변수 계산 ──
-    wt1_curr  = float(wt1.iloc[-1])
-    wt2_curr  = float(wt2.iloc[-1])
-    wt1_prev  = float(wt1.iloc[-2])
-    wt2_prev  = float(wt2.iloc[-2])
-
-    wt_cross_up   = (wt1_curr > wt2_curr) and (wt1_prev <= wt2_prev)
-    wt_cross_down = (wt1_curr < wt2_curr) and (wt1_prev >= wt2_prev)
-    wt_oversold   = wt1_curr < -60
-    wt_oversold_mid = wt1_curr < -40
-    wt_overbought = wt1_curr > 60
-    wt_rising     = wt1_curr > wt1_prev
-
-    sr    = sq.get('squeeze_released', False)
-    vs    = sq.get('vol_surge', False)
-    is_sq = sq.get('is_squeeze', False)
-
-    close         = df['Close']
-    close_p       = float(close.iloc[-1])
-    prev_close    = float(close.iloc[-2]) if len(close) > 1 else close_p
+    # ── 1. 기초 데이터 및 거래량 ──
+    close = df['Close']
+    close_p = float(close.iloc[-1])
     
-    vol_curr      = float(df['Volume'].iloc[-1])
-    vol_ma20      = sq.get('vol_ma20', 0)
-    vol_ratio     = (vol_curr / vol_ma20) if vol_ma20 > 0 else 0
-    change_rate   = ((close_p - prev_close) / prev_close) * 100
-    
-    # ── 2. 이동평균선 및 이격도 (5, 10, 20, 60일) ──
-    sma5 = close.rolling(5).mean()
-    sma10 = close.rolling(10).mean()
+    vol_curr = float(df['Volume'].iloc[-1])
+    vol_ma20 = sq.get('vol_ma20', 0)
+    vol_ratio = (vol_curr / vol_ma20) if vol_ma20 > 0 else 0
+
+    # ── 2. 이동평균선 및 이격도 (정배열/우상향 판별) ──
     sma20 = close.rolling(20).mean()
     sma60 = close.rolling(60).mean()
 
-    sma5_val = float(sma5.iloc[-1]) if not pd.isna(sma5.iloc[-1]) else close_p
-    sma10_val = float(sma10.iloc[-1]) if not pd.isna(sma10.iloc[-1]) else close_p
-    sma20_val = float(sma20.iloc[-1]) if not pd.isna(sma20.iloc[-1]) else close_p
-    sma60_val = float(sma60.iloc[-1]) if not pd.isna(sma60.iloc[-1]) else close_p
+    sma20_curr = float(sma20.iloc[-1]) if not pd.isna(sma20.iloc[-1]) else close_p
+    sma20_prev = float(sma20.iloc[-2]) if not pd.isna(sma20.iloc[-2]) else close_p
+    sma60_curr = float(sma60.iloc[-1]) if not pd.isna(sma60.iloc[-1]) else close_p
 
-    deviation     = ((close_p - sma20_val) / sma20_val) * 100 if sma20_val > 0 else 0
-    deviation_60  = ((close_p - sma60_val) / sma60_val) * 100 if sma60_val > 0 else 0
+    # [조건 1] 20일선 > 60일선 (정배열)
+    is_golden_alignment = sma20_curr > sma60_curr
+    
+    # [조건 2] 20일선 우상향
+    is_sma20_rising = sma20_curr >= sma20_prev
 
-    # ── 3. MACD 및 볼린저 밴드 ──
+    # [위험 차단] 20일선/60일선 이격도 과열 (상투 잡기 방지)
+    # 시장별 이격도 한계치 (KR: 15%, US: 20%, COIN: 25%)
+    sma_gap_ratio = ((sma20_curr - sma60_curr) / sma60_curr) * 100 if sma60_curr > 0 else 0
+    gap_limit = 15 if market_type == 'KR' else (25 if market_type == 'COIN' else 20)
+    is_sma_overheated = sma_gap_ratio > gap_limit
+
+    # ── 3. MACD 모멘텀 (방아쇠) ──
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
     macd_line = ema12 - ema26
     macd_sig = macd_line.ewm(span=9, adjust=False).mean()
-    macd_hist = float((macd_line - macd_sig).iloc[-1])
-
-    bb_mid = sma20
-    bb_std = close.rolling(20).std()
-    bb_width_series = pd.Series(0.0, index=close.index)
-    valid_idx = bb_mid > 0
-    bb_width_series[valid_idx] = ((bb_mid[valid_idx] + 2*bb_std[valid_idx]) - (bb_mid[valid_idx] - 2*bb_std[valid_idx])) / bb_mid[valid_idx]
+    macd_hist = macd_line - macd_sig
     
-    bb_mean = bb_width_series.rolling(20).mean().iloc[-1]
-    is_bb_valid = not pd.isna(bb_mean)
-    bb_was_narrow = (bb_width_series.iloc[-5:].min() < bb_mean * 0.7) if is_bb_valid else False
-    bb_already_expanded = (bb_width_series.iloc[-1] > bb_mean * 1.3) if is_bb_valid else False
+    macd_hist_curr = float(macd_hist.iloc[-1])
+    macd_hist_prev = float(macd_hist.iloc[-2])
 
-    st_just_turned_up = (trend == 1) and (trend_prev == -1)
+    # [조건 3] MACD 첫 골든크로스 (히스토그램 마이너스 -> 플러스 돌파)
+    is_macd_golden_cross = (macd_hist_curr > 0) and (macd_hist_prev <= 0)
 
-    # ── 4. 🚨 위험 필터 (과열 및 가짜 반등 감지) ──
-    dev_limit = 15 if market_type == 'KR' else (30 if market_type == 'COIN' else 20)
-    alt_limit = 15 if market_type == 'KR' else 25 # ETF/국내주식은 60일선 15% 이상이면 고도 높음
+    # ── 4. 청산(매도) 시그널 ──
+    is_st_down_turned = (trend == -1) and (trend_prev == 1)
+    is_price_broken_sma20 = close_p < sma20_curr
+
+    # ── 5. 🎯 최종 시그널 판정 (우선순위) ──
     
-    is_ghost_tick = vol_ratio < 0.5 
-    is_high_altitude = deviation_60 > alt_limit  
-    
-    # 5일선이 10일선 데드크로스 났거나 하락 중이면 박스권 고점 후 하락 징후
-    is_box_top = (sma5_val < sma10_val) or (float(sma5.iloc[-1]) < float(sma5.iloc[-2]))
-    is_momentum_dead = (macd_hist < 0) or is_box_top
+    # 🚨 [매도 청산 최우선]: ST 하락 전환 또는 20일선 이탈 시 기계적 청산
+    if is_st_down_turned:
+        s = ("📉 매도 (추세 꺾임)", "b01", 5, "SuperTrend 하락 전환. 보유량 전량 익절/손절")
+    elif is_price_broken_sma20:
+        s = ("📉 익절/손절 주의 (20일선 이탈)", "b01", 5, "단기 생명선(20일선) 하향 이탈. 리스크 관리")
+    elif trend == -1:
+        s = ("📉 하락 추세 지속", "c04", 5, "하락 추세 진행 중. 진입 금지")
 
-    is_chasing    = (change_rate > 10) or bb_already_expanded or (deviation > dev_limit) or is_high_altitude
-    is_pullback   = abs(deviation) < 10
+    # 🛑 [상위 필터]: 거시 지수 하락 시 타점 무시
+    elif is_macd_golden_cross and index_trend == -1:
+        s = ("⚠️ 매수 보류 (시장 지수 하락)", "c02", 0, "종목 타점 발생했으나 거시 시장 역배열. 관망")
 
-    # 🎯 [핵심 추가] 파란펜 타점: ST 전환 여부와 상관없이 BB수축 + WT골크 + 거래량 동반 시
-    is_squeeze_breakout = bb_was_narrow and wt_cross_up and (vol_ratio >= 1.0 or vs)
+    # 🛑 [위험 차단]: 장기 이격도 과열 또는 유령 거래량 차단
+    elif is_macd_golden_cross and is_sma_overheated:
+        s = ("⚠️ 추격 금지 (이평선 과열)", "b03", 4, f"20/60일선 간격({sma_gap_ratio:.1f}%) 상투권. 진입 보류")
+    elif is_macd_golden_cross and vol_ratio < 0.3:
+        s = ("↔️ 관망 (거래량 부족)", "c02", 0, "MACD 교차했으나 거래량 실리지 않음. 가짜 신호 주의")
 
-    # ── 5. 최우선 판정 로직 ──
-    
-    # 최상위 위험 필터
-    if (st_just_turned_up or sr or wt_cross_up) and is_ghost_tick:
-        s = ("↔️ 관망 (거래량 부족)", "c02", 0, f"거래량 배수({vol_ratio:.2f}) 미달. 속임수 방지")
-    elif (st_just_turned_up or sr or wt_cross_up or is_squeeze_breakout) and is_chasing and not is_pullback:
-        s = ("⚠️ 추격 금지 (폭발 후 과열/고점)", "b03", 4, "단기/중기 이격도 과열 또는 BB확장. 진입 보류")
-        
-    # 🥇 [S급/A급 특례]: 응축 돌파 선취매 (사용자가 짚은 파란펜 타점!)
-    elif is_squeeze_breakout and not is_high_altitude:
-        s = ("🔥 응축 돌파 (A급 타점)", "a01", 1, "수축 구간에서 거래량 동반 상승 돌파. 선취매 타점")
+    # 🥇 [매수 진입 - A급]: 요청하신 완벽한 정석 타점
+    elif is_macd_golden_cross and is_golden_alignment and is_sma20_rising and obv_confirmed:
+        s = ("🚀 정석 매수 (A급 타점)", "a01", 1, "20일선 우상향 정배열 + OBV 상승 + MACD 골크")
 
-    # 🥇 [S급]: 폭발 초입 (이미 돌파되어 ST까지 전환된 가장 확실한 자리)
-    elif st_just_turned_up and bb_was_narrow and vs and wt_rising and not is_high_altitude:
-        s = ("🚀 폭발 초입 (S급 타점)", "a00", 1, "BB수축+ST전환+거래량 폭발. 상승 초입")
-        
-    # 🥈 [A급]: 눌림목 반등 (진짜 눌림목 검증 추가)
-    # 조건 1: deviation < 5 (10%는 ETF에 너무 넓음. 20일선에 더 가까이 붙어야 함)
-    # 조건 2: wt1_curr < 20 (파동 지표가 상단(과매수)에서 노는 게 아니라, 0선 부근이나 그 아래까지 충분히 식은 상태에서 크로스 나야 함)
-    elif trend == 1 and wt_cross_up and obv_confirmed and deviation < 5 and wt1_curr < 20 and not is_high_altitude and not is_momentum_dead:
-    # 🥈 [A급]: 눌림목 반등 (정상적인 추세 진행 중 눌림목)
-    # elif trend == 1 and wt_cross_up and obv_confirmed and deviation < 10 and not is_high_altitude and not is_momentum_dead:
-        if wt_oversold_mid:
-            s = ("🔥 눌림목 반등 (A급 — 과매도)", "a01", 2, "안전한 20일선 지지 반등")
-        else:
-            s = ("🔥 눌림목 반등 (A급 타점)", "a01", 2, "안전한 20일선 부근 지지 후 반등")
-            
-    # 🥉 [B급 이하]: 모멘텀이 둔화되었거나 고점이 가까워진 경우
-    elif trend == 1 and wt_cross_up:
-        s = ("✅ 매수 보류 (추세 확인 요망)", "a02", 3, "지표 피로도 누적(MACD/단기이평 하락). 신규 진입 자제")
+    # 🥈 [매수 진입 - B급]: 정배열은 아니지만 20일선이 고개를 든 바닥 턴어라운드 (선택)
+    elif is_macd_golden_cross and is_sma20_rising and obv_confirmed:
+        s = ("🔥 바닥 탈출 (B급 타점)", "a02", 2, "20일선 우상향 턴 + MACD 골크. 60일선 저항 주의")
 
-    # 🔄 [대기]: 응축 진행 중
-    elif bb_was_narrow and wt_rising:
-        if is_sq:
-            s = ("↔️ 응축 중 (방향 탐색)", "a03", 3, "수축 진행 중. 방향 확정 대기")
-        else:
-            s = ("↔️ 응축 해제 대기 (돌파 전)", "a03", 3, "수축 해제됨. 확실한 거래량/ST 전환 대기")
+    # 🔄 [홀딩]: 골크 이후 순항 중
+    elif macd_hist_curr > 0 and is_golden_alignment and is_sma20_rising:
+        s = ("✅ 상승 추세 진행 중", "a05", 3, "20일선 정배열 추세 유지 중")
 
-    # ── 6. 익절 및 매도 로직 ──
-    elif trend == 1 and wt_overbought and wt_cross_down:
-        s = ("⚠️ 고점 주의 (신규 진입 금지)", "b03", 4, "과매수 구간 WT 데드크로스. 익절 고려")
-    elif trend == 1 and wt_overbought:
-        s = ("⚠️ 과매수 (보유 유지, 신규 금지)", "b03", 4, "과매수 구간 진입")
-    elif trend == -1 and wt_cross_up and wt_oversold and obv_confirmed:
-        s = ("📉 단기 바닥 포착 (낙폭 과대)", "a04", 5, "하락추세 중 극단 과매도 반등. 단기 매매만")
-    elif trend == -1 and wt_cross_down:
-        s = ("📉 매도 (하락 가속)", "b01", 5, "하락추세 + WT 데드크로스. 보유 청산 고려")
-    elif trend == -1 and not wt_rising:
-        s = ("📉 하락 추세 지속", "c04", 5, "하락추세 유지 중. 진입 금지")
     else:
-        s = ("↔️ 방향 탐색 중", "c02", 0, "추세 불명확. 대기")
+        s = ("↔️ 횡보/관망", "c02", 0, "뚜렷한 진입/청산 타점 부재")
 
+    # DB 호환성을 위해 리턴 포맷은 기존과 100% 동일하게 유지
     return {
         'signal':        s[0],
         'signal_code':   s[1],
         'priority':      s[2],
         'action':        s[3],
-        'wt_cross_up':   wt_cross_up,
-        'wt_cross_down': wt_cross_down,
-        'wt_oversold':   wt_oversold,
-        'wt_overbought': wt_overbought,
-        'wt_momentum':   round(wt1_curr - wt1_prev, 4),
-        'wt1':           round(wt1_curr, 4),
-        'wt2':           round(wt2_curr, 4),
+        'wt_cross_up':   is_macd_golden_cross,  # 프론트에서 교체 없이 MACD 크로스를 인식하도록 맵핑
+        'wt_cross_down': is_st_down_turned,
+        'wt_oversold':   False,
+        'wt_overbought': is_sma_overheated,
+        'wt_momentum':   round(macd_hist_curr - macd_hist_prev, 4),
+        'wt1':           round(macd_hist_curr, 4), # MACD 값 전달
+        'wt2':           round(macd_hist_prev, 4),
     }
+
+# def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df, market_type='KR'):
+#     """우선순위 및 손익비(리스크) 기반 시그널 판정 (응축 돌파 선취매 로직 포함)"""
+    
+#     # ── 1. 지표 상태 변수 계산 ──
+#     wt1_curr  = float(wt1.iloc[-1])
+#     wt2_curr  = float(wt2.iloc[-1])
+#     wt1_prev  = float(wt1.iloc[-2])
+#     wt2_prev  = float(wt2.iloc[-2])
+
+#     wt_cross_up   = (wt1_curr > wt2_curr) and (wt1_prev <= wt2_prev)
+#     wt_cross_down = (wt1_curr < wt2_curr) and (wt1_prev >= wt2_prev)
+#     wt_oversold   = wt1_curr < -60
+#     wt_oversold_mid = wt1_curr < -40
+#     wt_overbought = wt1_curr > 60
+#     wt_rising     = wt1_curr > wt1_prev
+
+#     sr    = sq.get('squeeze_released', False)
+#     vs    = sq.get('vol_surge', False)
+#     is_sq = sq.get('is_squeeze', False)
+
+#     close         = df['Close']
+#     close_p       = float(close.iloc[-1])
+#     prev_close    = float(close.iloc[-2]) if len(close) > 1 else close_p
+    
+#     vol_curr      = float(df['Volume'].iloc[-1])
+#     vol_ma20      = sq.get('vol_ma20', 0)
+#     vol_ratio     = (vol_curr / vol_ma20) if vol_ma20 > 0 else 0
+#     change_rate   = ((close_p - prev_close) / prev_close) * 100
+    
+#     # ── 2. 이동평균선 및 이격도 (5, 10, 20, 60일) ──
+#     sma5 = close.rolling(5).mean()
+#     sma10 = close.rolling(10).mean()
+#     sma20 = close.rolling(20).mean()
+#     sma60 = close.rolling(60).mean()
+
+#     sma5_val = float(sma5.iloc[-1]) if not pd.isna(sma5.iloc[-1]) else close_p
+#     sma10_val = float(sma10.iloc[-1]) if not pd.isna(sma10.iloc[-1]) else close_p
+#     sma20_val = float(sma20.iloc[-1]) if not pd.isna(sma20.iloc[-1]) else close_p
+#     sma60_val = float(sma60.iloc[-1]) if not pd.isna(sma60.iloc[-1]) else close_p
+
+#     deviation     = ((close_p - sma20_val) / sma20_val) * 100 if sma20_val > 0 else 0
+#     deviation_60  = ((close_p - sma60_val) / sma60_val) * 100 if sma60_val > 0 else 0
+
+#     # ── 3. MACD 및 볼린저 밴드 ──
+#     ema12 = close.ewm(span=12, adjust=False).mean()
+#     ema26 = close.ewm(span=26, adjust=False).mean()
+#     macd_line = ema12 - ema26
+#     macd_sig = macd_line.ewm(span=9, adjust=False).mean()
+#     macd_hist = float((macd_line - macd_sig).iloc[-1])
+
+#     bb_mid = sma20
+#     bb_std = close.rolling(20).std()
+#     bb_width_series = pd.Series(0.0, index=close.index)
+#     valid_idx = bb_mid > 0
+#     bb_width_series[valid_idx] = ((bb_mid[valid_idx] + 2*bb_std[valid_idx]) - (bb_mid[valid_idx] - 2*bb_std[valid_idx])) / bb_mid[valid_idx]
+    
+#     bb_mean = bb_width_series.rolling(20).mean().iloc[-1]
+#     is_bb_valid = not pd.isna(bb_mean)
+#     bb_was_narrow = (bb_width_series.iloc[-5:].min() < bb_mean * 0.7) if is_bb_valid else False
+#     bb_already_expanded = (bb_width_series.iloc[-1] > bb_mean * 1.3) if is_bb_valid else False
+
+#     st_just_turned_up = (trend == 1) and (trend_prev == -1)
+
+#     # ── 4. 🚨 위험 필터 (과열 및 가짜 반등 감지) ──
+#     dev_limit = 15 if market_type == 'KR' else (30 if market_type == 'COIN' else 20)
+#     alt_limit = 15 if market_type == 'KR' else 25 # ETF/국내주식은 60일선 15% 이상이면 고도 높음
+    
+#     is_ghost_tick = vol_ratio < 0.5 
+#     is_high_altitude = deviation_60 > alt_limit  
+    
+#     # 5일선이 10일선 데드크로스 났거나 하락 중이면 박스권 고점 후 하락 징후
+#     is_box_top = (sma5_val < sma10_val) or (float(sma5.iloc[-1]) < float(sma5.iloc[-2]))
+#     is_momentum_dead = (macd_hist < 0) or is_box_top
+
+#     is_chasing    = (change_rate > 10) or bb_already_expanded or (deviation > dev_limit) or is_high_altitude
+#     is_pullback   = abs(deviation) < 10
+
+#     # 🎯 [핵심 추가] 파란펜 타점: ST 전환 여부와 상관없이 BB수축 + WT골크 + 거래량 동반 시
+#     is_squeeze_breakout = bb_was_narrow and wt_cross_up and (vol_ratio >= 1.0 or vs)
+
+#     # ── 5. 최우선 판정 로직 ──
+    
+#     # 최상위 위험 필터
+#     if (st_just_turned_up or sr or wt_cross_up) and is_ghost_tick:
+#         s = ("↔️ 관망 (거래량 부족)", "c02", 0, f"거래량 배수({vol_ratio:.2f}) 미달. 속임수 방지")
+#     elif (st_just_turned_up or sr or wt_cross_up or is_squeeze_breakout) and is_chasing and not is_pullback:
+#         s = ("⚠️ 추격 금지 (폭발 후 과열/고점)", "b03", 4, "단기/중기 이격도 과열 또는 BB확장. 진입 보류")
+        
+#     # 🥇 [S급/A급 특례]: 응축 돌파 선취매 (사용자가 짚은 파란펜 타점!)
+#     elif is_squeeze_breakout and not is_high_altitude:
+#         s = ("🔥 응축 돌파 (A급 타점)", "a01", 1, "수축 구간에서 거래량 동반 상승 돌파. 선취매 타점")
+
+#     # 🥇 [S급]: 폭발 초입 (이미 돌파되어 ST까지 전환된 가장 확실한 자리)
+#     elif st_just_turned_up and bb_was_narrow and vs and wt_rising and not is_high_altitude:
+#         s = ("🚀 폭발 초입 (S급 타점)", "a00", 1, "BB수축+ST전환+거래량 폭발. 상승 초입")
+        
+#     # 🥈 [A급]: 눌림목 반등 (진짜 눌림목 검증 추가)
+#     # 조건 1: deviation < 5 (10%는 ETF에 너무 넓음. 20일선에 더 가까이 붙어야 함)
+#     # 조건 2: wt1_curr < 20 (파동 지표가 상단(과매수)에서 노는 게 아니라, 0선 부근이나 그 아래까지 충분히 식은 상태에서 크로스 나야 함)
+#     elif trend == 1 and wt_cross_up and obv_confirmed and deviation < 5 and wt1_curr < 20 and not is_high_altitude and not is_momentum_dead:
+#     # 🥈 [A급]: 눌림목 반등 (정상적인 추세 진행 중 눌림목)
+#     # elif trend == 1 and wt_cross_up and obv_confirmed and deviation < 10 and not is_high_altitude and not is_momentum_dead:
+#         if wt_oversold_mid:
+#             s = ("🔥 눌림목 반등 (A급 — 과매도)", "a01", 2, "안전한 20일선 지지 반등")
+#         else:
+#             s = ("🔥 눌림목 반등 (A급 타점)", "a01", 2, "안전한 20일선 부근 지지 후 반등")
+            
+#     # 🥉 [B급 이하]: 모멘텀이 둔화되었거나 고점이 가까워진 경우
+#     elif trend == 1 and wt_cross_up:
+#         s = ("✅ 매수 보류 (추세 확인 요망)", "a02", 3, "지표 피로도 누적(MACD/단기이평 하락). 신규 진입 자제")
+
+#     # 🔄 [대기]: 응축 진행 중
+#     elif bb_was_narrow and wt_rising:
+#         if is_sq:
+#             s = ("↔️ 응축 중 (방향 탐색)", "a03", 3, "수축 진행 중. 방향 확정 대기")
+#         else:
+#             s = ("↔️ 응축 해제 대기 (돌파 전)", "a03", 3, "수축 해제됨. 확실한 거래량/ST 전환 대기")
+
+#     # ── 6. 익절 및 매도 로직 ──
+#     elif trend == 1 and wt_overbought and wt_cross_down:
+#         s = ("⚠️ 고점 주의 (신규 진입 금지)", "b03", 4, "과매수 구간 WT 데드크로스. 익절 고려")
+#     elif trend == 1 and wt_overbought:
+#         s = ("⚠️ 과매수 (보유 유지, 신규 금지)", "b03", 4, "과매수 구간 진입")
+#     elif trend == -1 and wt_cross_up and wt_oversold and obv_confirmed:
+#         s = ("📉 단기 바닥 포착 (낙폭 과대)", "a04", 5, "하락추세 중 극단 과매도 반등. 단기 매매만")
+#     elif trend == -1 and wt_cross_down:
+#         s = ("📉 매도 (하락 가속)", "b01", 5, "하락추세 + WT 데드크로스. 보유 청산 고려")
+#     elif trend == -1 and not wt_rising:
+#         s = ("📉 하락 추세 지속", "c04", 5, "하락추세 유지 중. 진입 금지")
+#     else:
+#         s = ("↔️ 방향 탐색 중", "c02", 0, "추세 불명확. 대기")
+
+#     return {
+#         'signal':        s[0],
+#         'signal_code':   s[1],
+#         'priority':      s[2],
+#         'action':        s[3],
+#         'wt_cross_up':   wt_cross_up,
+#         'wt_cross_down': wt_cross_down,
+#         'wt_oversold':   wt_oversold,
+#         'wt_overbought': wt_overbought,
+#         'wt_momentum':   round(wt1_curr - wt1_prev, 4),
+#         'wt1':           round(wt1_curr, 4),
+#         'wt2':           round(wt2_curr, 4),
+#     }
 
 # def get_signal_priority(trend, trend_prev, wt1, wt2, obv_confirmed, sq, df, market_type='KR'):
 #     """우선순위 및 손익비(리스크) 기반 시그널 판정 (고점 횡보, MACD, 60일선 필터 완벽 적용)"""
